@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Try again — Polymath Learning Centre</title>
+
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  TRY AGAIN  ·  the worksheet a student's own mistakes come back as
+  ───────────────────────────────────────────────────────────────────
+  The Scan app (polymathlc/scan) marks a photographed paper and keeps
+  every question the student got wrong in their own mistake book. When
+  they choose some and press "Make a worksheet", that app writes ONE
+  document to `scanPapers/{id}` and emails a link to this page.
+
+  WHY IT LIVES IN THIS REPO. This app already owns the two things the
+  worksheet needs — the printed-worksheet look, and an image model
+  that can clean a photographed figure up. The Scan app owns the
+  photographs, so it does the cropping; this does the rendering and
+  the clean-up.
+
+  WHAT IT MUST NEVER DO IS DISTURB THIS APP. It is a standalone file,
+  like bar-model.html and fps.html: it does not load app.js, it is not
+  a page inside the portal, and it reads and writes exactly TWO things
+  — the `scanPapers` document named in the URL, and pictures under
+  `scan-mistakes/` in Storage. It never touches the question bank, the
+  vetting list, the teaching notes, a hero, a leaderboard or a
+  student's progress. A scanned question must not appear anywhere in
+  this app's own content, which is the whole reason the Scan app's
+  collections are namespaced away from this one's.
+
+  TWO VERSIONS OF EVERY QUESTION, and the wording is the SAME in both.
+  What differs is only the picture:
+    • CLEANED UP (the default) — the figure redrawn as sharp black and
+      white line-work with the student's own pencil rubbed out, so the
+      question is blank again and can honestly be re-attempted.
+    • ORIGINAL — the rectangle exactly as it was photographed.
+  The wording, the options and the answers are the transcription the
+  Scan app already made and the teacher already marked against; an
+  image model never gets to rewrite a number in the question, only to
+  redraw the diagram beside it.
+
+  Nothing on this page is generated from scratch. If the image model
+  is unavailable or refuses, the original photograph is shown and the
+  page SAYS so — a blank space where a diagram should be is a question
+  nobody can answer.
+  ═══════════════════════════════════════════════════════════════════
+-->
+
+<style>
+  :root {
+    --bg: #FFFFFF;
+    --bg-soft: #F7F6F4;
+    --ink: #1A1A1A;
+    --ink-soft: #55554F;
+    --ink-faint: #8A8A84;
+    --accent: #DCEBDD;
+    --accent-deep: #4C8C52;
+    --line: #ECECEA;
+    --radius: 16px;
+    --radius-sm: 11px;
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+    --font: 'Century Gothic', CenturyGothic, AppleGothic, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font); color: var(--ink); background: var(--bg-soft);
+    -webkit-text-size-adjust: 100%; line-height: 1.6;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 22px 18px 70px; }
+
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 16px 22px; background: var(--bg); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .brandMark {
+    width: 40px; height: 40px; border-radius: 11px; background: var(--accent);
+    display: grid; place-items: center; font-size: 20px; flex: none;
+  }
+  .brandTitle { font-weight: 700; font-size: 1rem; }
+  .brandSub { font-size: 0.74rem; color: var(--ink-faint); }
+  .spacer { flex: 1; }
+
+  .btn {
+    font-family: var(--font); font-size: 0.88rem; font-weight: 600;
+    padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05); white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { background: var(--bg-soft); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent-deep); }
+
+  .card {
+    background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow-card); padding: 26px 28px; margin-bottom: 20px;
+  }
+  .card h2 { font-size: 1.1rem; margin-bottom: 10px; }
+  .sub { font-size: 0.88rem; color: var(--ink-soft); line-height: 1.7; }
+  .hint { font-size: 0.8rem; color: var(--ink-faint); line-height: 1.65; }
+
+  /* ---------- The mode switch ----------
+     Two buttons, not a dropdown: which version you are looking at is the
+     single most important thing on this page and it has to be readable at a
+     glance, from across a table, by a parent. */
+  .modeBar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+  .modeBtn {
+    font-family: var(--font); font-size: 0.86rem; font-weight: 600;
+    padding: 10px 18px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink-soft);
+  }
+  .modeBtn.on { background: var(--accent); border-color: var(--accent-deep); color: var(--ink); }
+  .modeNote { font-size: 0.8rem; color: var(--ink-faint); margin-top: 10px; line-height: 1.6; }
+
+  .prog { margin-top: 14px; display: none; }
+  .prog.on { display: block; }
+  .progBar { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+  .progFill { height: 100%; width: 0; background: var(--accent-deep); transition: width .3s ease; }
+  .progText { font-size: 0.8rem; color: var(--ink-soft); margin-top: 8px; }
+
+  /* ---------- The sheet ----------
+     A worksheet, on screen, at something close to the shape it prints at, so
+     what is being previewed really is what comes out of the printer. */
+  .sheet {
+    background: #fff; border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow-card); padding: 40px 44px; margin-bottom: 20px;
+  }
+  .shHead { border-bottom: 2px solid var(--ink); padding-bottom: 14px; margin-bottom: 8px; }
+  .shTitle { font-size: 1.15rem; font-weight: 700; }
+  .shOrg { font-size: 0.8rem; color: var(--ink-soft); margin-top: 4px; }
+  .shName {
+    display: flex; gap: 24px; flex-wrap: wrap;
+    font-size: 0.82rem; color: var(--ink-soft); margin: 16px 0 26px;
+  }
+  .shName span { border-bottom: 1px solid var(--ink-faint); min-width: 150px; padding-bottom: 2px; }
+  /* The instruction that closes the loop. It PRINTS — the whole point is that
+     it is read off the paper, away from any screen. */
+  .shHow {
+    font-size: 0.8rem; color: var(--ink-soft); line-height: 1.6; margin: -12px 0 26px;
+    padding: 10px 14px; border-radius: 8px; background: var(--bg-soft); border: 1px solid var(--line);
+  }
+  /* 🖼 THE GREEN BOX — bottom right, "Picture generated by …", raised every
+     time a figure is cleaned up here, naming the model that drew it. Screen
+     only: it is about the session, not the sheet. */
+  #imgBadge {
+    position: fixed; right: 20px; bottom: 20px; z-index: 60;
+    background: #15803d; color: #fff; border: 1px solid #22c55e; border-radius: 10px;
+    padding: 10px 14px; font-size: 0.82rem; font-weight: 500; line-height: 1.4;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18); max-width: min(92vw, 420px);
+    opacity: 0; transform: translateY(12px); transition: opacity .25s ease, transform .25s ease;
+    pointer-events: none;
+  }
+  #imgBadge.show { opacity: 1; transform: none; }
+  @media print { #imgBadge { display: none !important; } }
+
+  .q { padding: 20px 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
+  .q:last-child { border-bottom: 0; }
+  .qHead { display: flex; gap: 10px; align-items: baseline; margin-bottom: 10px; }
+  .qNum { font-weight: 700; font-size: 0.95rem; flex: none; }
+  .qMeta { font-size: 0.72rem; color: var(--ink-faint); }
+  .qText { font-size: 0.94rem; line-height: 1.75; white-space: pre-wrap; }
+  .qFig { margin: 16px 0; text-align: center; }
+  .qFig img { max-width: 100%; max-height: 340px; border: 1px solid var(--line); border-radius: 6px; }
+  /* A whole question is READ, not glanced at. The figure cap would put a
+     paragraph of 9pt print through a shrink it cannot survive, so a question
+     picture takes the column's full width and whatever height it needs. */
+  .qFig.whole { margin: 4px 0 0; text-align: left; }
+  .qFig.whole img { width: 100%; max-height: none; border-color: transparent; border-radius: 0; }
+  .qFig .figNote { font-size: 0.72rem; color: var(--ink-faint); margin-top: 6px; }
+  .qOpts { list-style: none; margin: 12px 0 0; display: flex; flex-direction: column; gap: 6px; }
+  .qOpts li { font-size: 0.9rem; padding: 5px 0; }
+  .qWork { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; min-height: 96px; }
+  .qWork.short { min-height: 52px; }
+  .qLine { margin-top: 16px; font-size: 0.88rem; color: var(--ink-soft); }
+  .qLine b { border-bottom: 1px solid var(--ink); display: inline-block; min-width: 170px; }
+
+  /* ---------- The answers, at the back ---------- */
+  .keyPage { break-before: page; }
+  .keyRow { padding: 14px 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
+  .keyRow:last-child { border-bottom: 0; }
+  .keyNum { font-weight: 700; font-size: 0.88rem; }
+  .keyAns { font-size: 0.9rem; margin-top: 5px; }
+  .keyWhy { font-size: 0.84rem; color: var(--ink-soft); margin-top: 5px; line-height: 1.7; }
+  .keyYou { font-size: 0.82rem; color: #8C2E1D; margin-top: 5px; }
+
+  .empty {
+    color: var(--ink-faint); text-align: center; padding: 46px 20px;
+    border: 1px dashed var(--line); border-radius: var(--radius); font-size: 0.92rem; line-height: 1.7;
+  }
+  .hidden { display: none !important; }
+
+  @media print {
+    header, .noPrint { display: none !important; }
+    body { background: #fff; }
+    .wrap { max-width: none; padding: 0; }
+    .sheet { border: 0; box-shadow: none; border-radius: 0; padding: 0 0 12mm; margin: 0; }
+    .q, .keyRow { break-inside: avoid; }
+    .qFig img { max-height: 260px; }
+    .qFig.whole img { max-height: none; }
+  }
+  @page { size: A4; margin: 14mm; }
+</style>
+</head>
+<body>
+
+<header class="noPrint">
+  <div class="brandMark">📕</div>
+  <div>
+    <div class="brandTitle">Try again</div>
+    <div class="brandSub">Polymath Learning Centre · <span id="verTag"></span></div>
+  </div>
+  <div class="spacer"></div>
+  <span class="hint" id="whoAmI"></span>
+  <button class="btn" id="signInBtn">Sign in</button>
+  <button class="btn hidden" id="signOutBtn">Sign out</button>
+</header>
+
+<div class="wrap">
+  <div id="gate" class="card">
+    <h2>Your worksheet</h2>
+    <p class="sub" id="gateText">Opening…</p>
+    <div style="margin-top:16px" id="gateBtns"></div>
+  </div>
+
+  <div id="paperWrap" class="hidden">
+    <div class="card noPrint">
+      <h2 id="pTitle">Try again</h2>
+      <p class="sub" id="pSub"></p>
+      <div class="modeBar">
+        <button class="modeBtn on" id="modeClean">🧽 Cleaned up</button>
+        <button class="modeBtn" id="modeOriginal">📷 The original photo</button>
+        <div class="spacer"></div>
+        <button class="btn primary" id="printBtn">🖨 Print / save as PDF</button>
+      </div>
+      <p class="modeNote" id="modeNote"></p>
+      <div class="prog" id="prog">
+        <div class="progBar"><div class="progFill" id="progFill"></div></div>
+        <div class="progText" id="progText"></div>
+      </div>
+    </div>
+    <div id="sheet"></div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app-check.js";
+import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-ai.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, updateDoc }
+  from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+import { getStorage, ref as sRef, uploadString, getDownloadURL }
+  from "https://www.gstatic.com/firebasejs/11.10.0/firebase-storage.js";
+import { getFunctions, httpsCallable }
+  from "https://www.gstatic.com/firebasejs/11.10.0/firebase-functions.js";
+
+const APP_VERSION = 'v1.6.1';
+document.getElementById('verTag').textContent = APP_VERSION;
+
+/* The one collection this page reads, and the one folder it writes. Named
+   here, once, so nothing below can quietly reach into this app's own data —
+   which is the whole contract with the Scan app. */
+const PAPER_COL = 'scanPapers';
+const IMG_PATH = 'scan-mistakes';
+const ADMIN_EMAILS = ['chungzhikai@gmail.com'];
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAUSI3Uh28IeqASEp0JhH4QPaVt-O3meBo",   // public web config, not a secret
+  authDomain: "mathgen--app.firebaseapp.com",
+  projectId: "mathgen--app",
+  storageBucket: "mathgen--app.firebasestorage.app",
+  messagingSenderId: "165654161198",
+  appId: "1:165654161198:web:16c8bd60eb3a2aa7edbcbf",
+  measurementId: "G-0MWZFG211D"
+};
+const RECAPTCHA_SITE_KEY = "6Le98gwtAAAAAAzkjJTZXFM5D8tpjx_P4rtRuhuH";
+
+const app = initializeApp(firebaseConfig);
+if (RECAPTCHA_SITE_KEY && !RECAPTCHA_SITE_KEY.startsWith("PASTE_")) {
+  try {
+    initializeAppCheck(app, { provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY), isTokenAutoRefreshEnabled: true });
+  } catch (e) { console.warn('App Check init failed:', e); }
+}
+const auth = getAuth(app);
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+/* The image models, in the same order and with the same fallback the portal's
+   own art and diagram work uses: the newer one first, the older one behind it,
+   because a project without access to one very often has the other. */
+const AI_IMAGE_MODELS = ["gemini-3.1-flash-image-preview", "gemini-2.5-flash-image"];
+let imageModels = [];
+try {
+  const ai = getAI(app, { backend: new GoogleAIBackend() });
+  imageModels = AI_IMAGE_MODELS.map(m => getGenerativeModel(ai, { model: m }));
+} catch (e) { console.warn('Firebase AI init failed (clean-up disabled):', e); }
+/* THE IMAGE ENGINE IS CHATGPT IMAGES 2.5 (portal v1.372.0), reached through
+   the `openAiImage` callable in polymathlc/math/functions — the key is a
+   Firebase secret on the server, which is the only way a STUDENT's phone can
+   draw with it, and this page runs on nothing but students' phones. Gemini's
+   image models above are the fallback: a refused server route (not deployed
+   yet, out of credit, capped) is remembered for IMG_SERVER_DOWN_MS rather than
+   paid for again on every figure of the sheet, and a refusal about ONE picture
+   (an invalid-argument) closes nothing. */
+const IMG_SERVER_DOWN_MS = 10 * 60 * 1000;
+let imgServerDownUntil = 0, imgServerWhy = '';
+let fns = null;
+const imageServerPossible = () => Date.now() > imgServerDownUntil || !/not-?found|failed-?precondition|not configured/i.test(imgServerWhy);
+const imageAiReady = () => imageModels.length > 0 || imageServerPossible();
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* =====================================================================
+   CLEANING THE FIGURE UP
+   ---------------------------------------------------------------------
+   The crop is a photograph of a page a child has written on. Two things have
+   to happen to it and they pull in opposite directions: the HANDWRITING has
+   to go, because a question you can still see your own wrong answer on is not
+   a question you can honestly try again; and NOTHING PRINTED may change,
+   because the wording beside it is the transcription the teacher marked
+   against and a diagram that disagrees with it is worse than a grey photo.
+
+   So the prompt is explicit in both directions, and everything around it is
+   built to fail safe: a model that will not answer, an answer that is not an
+   image, a project with no image model at all — each of them leaves the
+   ORIGINAL photograph on the page with a line saying so.
+   ===================================================================== */
+/* WHAT THE PICTURE IS decides two lines of the prompt and nothing else. A
+   FIGURE sits beside wording that is doing the asking; a QUESTION picture IS
+   the question — its number, its wording, its options and the space left for
+   the answer — cut out of the student's own photograph rather than retyped,
+   because a maths or science question is its layout as much as its words and
+   a transcription is only ever as good as the OCR.
+
+   The whole-question crop brings one problem the figure crop never had: it is
+   a rectangle off a photograph taken on a desk, so its edges can hold a
+   thumb, a shadow, the corner of the next question. That is what the extra
+   paragraph is for — and it says WHITE rather than "remove", because a model
+   told to remove something removes it and then draws something else there. */
+const CLEAN_SOURCE = {
+  figure:
+    'SOURCE: this is a photograph or scan of one figure cut out of a printed school worksheet or exam paper, and a ' +
+    'student has written on the page in pen or pencil.',
+  question:
+    'SOURCE: this is a photograph or scan of ONE WHOLE QUESTION cut out of a printed school worksheet or exam ' +
+    'paper — its number, its wording, any options, any figure or table, and the space left for the answer — and a ' +
+    'student has written on it in pen or pencil.'
+};
+const CLEAN_TASK = {
+  figure:
+    'TASK: redraw this as a clean BLACK-AND-WHITE line figure — crisp black line-work and text on a plain white ' +
+    'background, the way it looked when it was freshly printed, before anybody wrote on it.',
+  question:
+    'TASK: redraw this as the clean BLACK-AND-WHITE printed question it was — crisp black text and line-work on a ' +
+    'plain white background, laid out exactly as it is here, the way it looked on the day it was printed and ' +
+    'before anybody wrote on it. Someone is going to answer it again on this very picture, so the printed ' +
+    'question must survive whole and the space for the answer must come back EMPTY.'
+};
+/* Only the whole-question crop needs this: a figure was cut from inside the
+   page and has no outside to tidy. */
+const CLEAN_EDGES =
+  'THE EDGES: anything in this picture that is not the printed question itself must become plain white — a hand ' +
+  'or finger holding the page, the desk, the table edge, a shadow falling across the paper, the dark border ' +
+  'beyond the sheet, a staple or a punched hole, and any sliver of the question above or below that has crept ' +
+  'into the frame. Make those areas white; do not draw anything in their place, do not crop, do not move the ' +
+  'question and do not resize it — it must stay exactly where it is in the frame.\n';
+function cleanPrompt(kind) {
+  const k = kind === 'question' ? 'question' : 'figure';
+  return CLEAN_SOURCE[k] + ' Expect faint or broken printed lines, a grey or unevenly lit ' +
+  'background, speckle and dirt, show-through from the back of the sheet, shadows, slight skew and blur.\n' +
+  CLEAN_TASK[k] + '\n' +
+  (k === 'question' ? CLEAN_EDGES : '') +
+  'REMOVE, because they are not part of the question: every handwritten mark — pencil and pen working, numbers ' +
+  'the student has written in, arrows and jottings they have added, circled or ticked answers, crossings-out, ' +
+  'underlining they have drawn, and any marking in red. Remove the scanning damage too: speckle, dirt, shadows, ' +
+  'show-through, staple and punch marks, and the grey cast.\n' +
+  'KEEP EXACTLY AS THEY ARE, and this matters more than the cleaning: every PRINTED line, shape, arrow, axis, ' +
+  'label, number, unit and word, in the same places, at the same proportions, saying the same thing. Straighten ' +
+  'what is meant to be straight and darken a faint printed stroke to a solid one, but never add a label, a ' +
+  'number, an axis value or a shape that is not there, and never replace a character you cannot read with a ' +
+  'plausible one — reproduce what is printed. If you cannot tell a printed mark from a handwritten one, KEEP it.\n' +
+  'Do not add shading, colour, gradients, texture, a border, a caption or a new style, and do not rearrange ' +
+  'anything. Output only the image, at the same aspect ratio.';
+}
+
+function inlineImageOf(result) {
+  const parts = result?.response?.inlineDataParts ? result.response.inlineDataParts() : [];
+  for (const p of parts || []) {
+    const img = p.inlineData || p;
+    if (img?.data && img?.mimeType?.startsWith('image/')) return img;
+  }
+  const cands = result?.response?.candidates || result?.candidates || [];
+  for (const c of cands) {
+    for (const p of (c?.content?.parts || [])) {
+      const img = p.inlineData || p.inline_data;
+      if (img?.data && img?.mimeType?.startsWith('image/')) return img;
+      if (img?.data && img?.mime_type?.startsWith('image/')) return { data: img.data, mimeType: img.mime_type };
+    }
+  }
+  return null;
+}
+/* ChatGPT Images 2.5 by the server's key. The crop goes up as the ONE
+   reference picture of an EDIT — the 2.5 family reads it at high fidelity by
+   itself and REFUSES an `input_fidelity` field, so none is sent (v1.6.1) —
+   and `size: auto` keeps the crop's own shape rather than squaring it off. */
+async function cleanFigureChatGpt(dataUrl, kind) {
+  if (!fns) fns = getFunctions(app);
+  const mime = (/^data:([^;,]+)/.exec(dataUrl) || [])[1] || 'image/jpeg';
+  const res = await httpsCallable(fns, 'openAiImage', { timeout: 240000 })({
+    prompt: cleanPrompt(kind),
+    images: [{ mimeType: mime, data: dataUrl.split(',')[1] || '' }],
+    size: 'auto',
+    quality: 'high',
+    outputFormat: 'png'
+  });
+  const d = res && res.data;
+  if (!d || typeof d.b64 !== 'string' || !d.b64) throw new Error('the server image route returned no picture');
+  // The server names the model it really drew with — that is what the badge says.
+  imageAnnounce('ChatGPT Images · ' + ((typeof d.model === 'string' && d.model) || 'gpt-image-2.5') + ' · server key');
+  return 'data:' + (d.mimeType || 'image/png') + ';base64,' + d.b64;
+}
+/* 🖼 THE GREEN BOX — bottom right, every time a figure is cleaned up here,
+   naming the model that drew it. The same box the portal shows for every
+   picture it generates; this page is standalone so it carries its own copy.
+   A repeat within the hold stacks a ×N rather than a second box, and nothing
+   here can throw into the clean-up. */
+const IMG_BADGE_MS = 6500;
+let _imgBadgeTimer = null, _imgBadgeLast = '', _imgBadgeN = 0;
+function imageAnnounce(what) {
+  try {
+    let el = document.getElementById('imgBadge');
+    if (!el) { el = document.createElement('div'); el.id = 'imgBadge'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
+    const text = '🖼 Picture generated by ' + what;
+    _imgBadgeN = (el.classList.contains('show') && _imgBadgeLast === text) ? _imgBadgeN + 1 : 1;
+    _imgBadgeLast = text;
+    el.textContent = text + (_imgBadgeN > 1 ? ' ×' + _imgBadgeN : '');
+    el.classList.add('show');
+    clearTimeout(_imgBadgeTimer);
+    _imgBadgeTimer = setTimeout(() => { el.classList.remove('show'); _imgBadgeN = 0; }, IMG_BADGE_MS);
+  } catch (e) { console.warn('image badge:', e); }
+}
+async function cleanFigure(dataUrl, kind) {
+  let first = null;
+  if (Date.now() > imgServerDownUntil) {
+    try { return await cleanFigureChatGpt(dataUrl, kind); }
+    catch (e) {
+      first = e;
+      console.warn('ChatGPT Images clean-up failed, falling back to Gemini', e);
+      // A refusal about THIS picture says nothing about the route.
+      if (!/invalid-argument/.test(String((e && e.code) || ''))) {
+        imgServerDownUntil = Date.now() + IMG_SERVER_DOWN_MS;
+        imgServerWhy = String((e && e.message) || e || '');
+      }
+    }
+  }
+  if (!imageModels.length) throw first || new Error('no image model');
+  const mime = (/^data:([^;,]+)/.exec(dataUrl) || [])[1] || 'image/jpeg';
+  const parts = [cleanPrompt(kind), { inlineData: { mimeType: mime, data: dataUrl.split(',')[1] || '' } }];
+  let last = first;
+  for (let i = 0; i < imageModels.length; i++) {
+    const model = imageModels[i];
+    try {
+      const res = await model.generateContent(parts);
+      const img = inlineImageOf(res);
+      if (img) {
+        // `imageModels` is built 1:1 from AI_IMAGE_MODELS, so the id that answered is the same index.
+        imageAnnounce('Gemini · ' + (AI_IMAGE_MODELS[i] || 'image model'));
+        return 'data:' + (img.mimeType || 'image/png') + ';base64,' + img.data;
+      }
+      last = new Error('the model did not return a picture');
+    } catch (e) { last = e; console.warn('clean-up model failed', e); }
+  }
+  throw last || new Error('the figure could not be cleaned');
+}
+
+/* A Storage URL cannot be handed to a model, and a canvas that has drawn a
+   cross-origin picture cannot be read back. So the crop is fetched as a data
+   URL first, and a fetch that fails is simply a figure that stays original. */
+async function urlToDataUrl(url) {
+  const resp = await fetch(url, { mode: 'cors', cache: 'no-store' });
+  if (!resp.ok) throw new Error('the picture could not be loaded');
+  const blob = await resp.blob();
+  return await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = () => rej(new Error('the picture could not be read'));
+    r.readAsDataURL(blob);
+  });
+}
+
+/* =====================================================================
+   THE PAPER
+   ===================================================================== */
+let user = null;
+let paperId = new URLSearchParams(location.search).get('p') || '';
+let paper = null;
+let mode = 'clean';
+let cleaning = false;
+let cleanFail = 0;          // figures the model would not clean, this visit
+
+const isAdmin = u => !!u && ADMIN_EMAILS.includes((u.email || '').toLowerCase());
+const expired = p => { const t = Date.parse(p && p.expiresAt); return isFinite(t) && t < Date.now(); };
+
+function gate(html, btns) {
+  $('gate').classList.remove('hidden');
+  $('paperWrap').classList.add('hidden');
+  $('gateText').innerHTML = html;
+  $('gateBtns').innerHTML = btns || '';
+}
+
+async function open() {
+  if (!paperId) {
+    gate('This link is missing its worksheet. Open the link from your email again — it should end in <code>?p=…</code>.');
+    return;
+  }
+  if (!user) {
+    gate('Sign in with the same account you scanned your paper with, and your worksheet opens here.',
+      '<button class="btn primary" onclick="window.__signIn()">Sign in with Google</button>');
+    return;
+  }
+  gate('Opening your worksheet…');
+  let snap;
+  try { snap = await getDoc(doc(db, PAPER_COL, paperId)); }
+  catch (e) {
+    console.warn(e);
+    gate('This worksheet could not be opened — you may be signed in with a different account from the one it was made on.');
+    return;
+  }
+  if (!snap.exists()) { gate('This worksheet is no longer here. Make a new one from your mistake book in the Scan app.'); return; }
+  const p = snap.data();
+  // It is the student's own marked work, so the link alone is not enough:
+  // only the account it was made on, or their teacher, can read it.
+  if (p.owner !== user.uid && !isAdmin(user)) {
+    gate('This worksheet belongs to somebody else. Sign in with the account it was made on.');
+    return;
+  }
+  if (expired(p)) { gate('This worksheet has expired. Make a new one from your mistake book in the Scan app.'); return; }
+  paper = p;
+  mode = (p.mode === 'original') ? 'original' : 'clean';
+  $('gate').classList.add('hidden');
+  $('paperWrap').classList.remove('hidden');
+  render();
+  if (mode === 'clean') cleanAll();
+}
+
+/* ---- Rendering ----
+   ONE renderer for both versions: the wording, the options and the answers
+   are identical, and only the picture is chosen by the mode. Two renderers
+   would be two things to keep in step, and the version a student is looking
+   at would eventually stop being the version they chose. */
+/* IS THE PICTURE THE QUESTION, OR A FIGURE BELONGING TO ONE? The scan says so
+   (`shot`), and it can never be guessed here: printed the wrong way round, a
+   question picture has its own wording typed out above it as well — the
+   question asked twice — and a figure has no wording at all, which is a
+   diagram with nothing asking anything. A paper made before the scan sent the
+   flag holds figures, which is what it defaults to. */
+function isWholeQuestion(it) { return it.shot === 'question' && !!it.img; }
+
+/* THE QUESTION SET OUT AGAIN — the best of the three tiers, and the reason
+   this page exists at all. The Scan app reads the printed question off the
+   photograph into ORDERED BLOCKS — the wording as text, with an "image" block
+   wherever a figure belongs, each figure cut from the page by its own
+   rectangle — the way the Learning Portal's Rapid add builds a question. What
+   comes back is the question TYPESET, with the paper's own diagrams still in
+   it: sharp at any size, and readable on a phone in a way a photograph of 9pt
+   print never is.
+
+   It is re-validated HERE and not trusted from the document. A paper is
+   written by another app, in another repository, at whatever version it
+   happened to be — and a block that would not draw is one the worksheet
+   cannot show, which is a thing to find out now rather than on the printed
+   page. A build with no WORDING in it is refused outright: the tiers below it
+   are better than a question made of pictures with nothing asking anything. */
+function questionBlocks(it) {
+  const raw = Array.isArray(it.blocks) ? it.blocks : [];
+  const usable = raw.filter(b => b && (b.type === 'image'
+    ? !!b.url
+    : !!String(b.text || '').trim()));
+  return usable.some(b => b.type !== 'image') ? usable : [];
+}
+
+/* Which of the three a question is being shown as. ONE place decides it, so
+   the renderer, the cleaner and the note under the buttons can never disagree
+   about what the student is looking at. */
+function tierOf(it) {
+  if (questionBlocks(it).length) return 'built';
+  if (isWholeQuestion(it)) return 'whole';
+  return 'flat';
+}
+
+function figNote(haveClean) {
+  if (mode !== 'clean' || haveClean) return '';
+  return cleaning
+    ? 'cleaning this up…'
+    : 'shown as photographed — this one could not be cleaned up, so your own working is still on it';
+}
+
+function blocksHtml(it, blocks) {
+  return blocks.map((b, i) => {
+    if (b.type !== 'image') return '<div class="qText">' + esc(b.text) + '</div>';
+    const src = (mode === 'clean' && b.cleanImg) ? b.cleanImg : b.url;
+    const note = figNote(!!b.cleanImg);
+    /* A figure that will not load takes itself off the page rather than
+       leaving a broken frame in the middle of the wording — the text around
+       it is still doing the asking, which is exactly what the whole-question
+       crop cannot fall back on. */
+    return '<div class="qFig" id="blk_' + it.n + '_' + i + '">' +
+      '<img src="' + esc(src) + '" alt="Figure for question ' + it.n + '"' +
+      ' onerror="window.__blkFailed(' + it.n + ',' + i + ')">' +
+      (note ? '<div class="figNote">' + esc(note) + '</div>' : '') + '</div>';
+  }).join('');
+}
+
+function figureFor(it) {
+  if (!it.img) return '';
+  const whole = isWholeQuestion(it);
+  const clean = mode === 'clean' && it.cleanImg;
+  const src = clean ? it.cleanImg : it.img;
+  const note = figNote(!!it.cleanImg);
+  const alt = whole ? 'Question ' + it.n + ' as it was printed' : 'The figure for question ' + it.n;
+  /* A whole-question item prints no wording of its own, so a picture that will
+     not load — a Storage URL that has expired, a phone with no signal — would
+     leave a numbered question with nothing in it at all. The transcription is
+     still on the item; it simply steps forward when the picture fails. */
+  const onErr = whole ? ' onerror="window.__figFailed(' + it.n + ')"' : '';
+  return '<div class="qFig' + (whole ? ' whole' : '') + '" id="fig_' + it.n + '">' +
+    '<img src="' + esc(src) + '" alt="' + alt + '"' + onErr + '>' +
+    (note ? '<div class="figNote">' + esc(note) + '</div>' : '') + '</div>';
+}
+function optsHtml(it) {
+  return '<ul class="qOpts">' + (it.options || []).map(o =>
+    '<li>(' + esc(o.label) + ')&nbsp; ' + esc(o.text) + '</li>').join('') + '</ul>';
+}
+/* 🔢 THE CHOICES ARE A PICTURE.
+   A multiple-choice question whose four options are little drawings has no
+   options that can be written out — the Scan app holds four empty strings for
+   it — so it sends the four of them as ONE cropped picture, marked
+   `role: 'options'`, and the word list under the question must then not be
+   printed as well. Printed anyway it is four empty brackets under the picture
+   that already carries the choices, which reads as a fault in the sheet.
+
+   IT IS AN ORDINARY `image` BLOCK WEARING A ROLE, so a version of this page
+   that has never heard of picture options still draws it — the block is not
+   dropped, the question is still answerable, and only the tidying is lost.
+   That is why the flag is a field on a known type rather than a type of its
+   own, and it is the whole contract with `polymathlc/scan`: rename the word
+   there or here and the picture still prints, with four empty brackets back
+   underneath it and nothing anywhere to say why. */
+function hasPictureOptions(blocks) {
+  return (blocks || []).some(b => b && b.type === 'image' && b.role === 'options' && b.url);
+}
+function questionHtml(it) {
+  const tier = tierOf(it);
+  const mcq = (it.options || []).length > 0;
+  let body, opts, room;
+  if (tier === 'built') {
+    /* The wording is typeset and the figures sit where they belong, so the
+       options are printed underneath as usual — the Scan app deliberately
+       leaves them OUT of the blocks, because it already holds them and a
+       second copy inside the wording would be the choices offered twice. A
+       typeset question brings none of the paper's own ruled space with it, so
+       it gets the full working box. */
+    const built = questionBlocks(it);
+    body = blocksHtml(it, built);
+    opts = (mcq && !hasPictureOptions(built)) ? optsHtml(it) : '';
+    room = mcq
+      ? '<div class="qLine">Answer: <b>&nbsp;</b></div>'
+      : '<div class="qWork"></div><div class="qLine">Answer: <b>&nbsp;</b></div>';
+  } else if (tier === 'whole') {
+    /* The picture already carries the wording and the options, so printing
+       them again would be the same question twice down one sheet. The
+       transcription does not go to waste — it is still what the marking was
+       done against, it is still what fills the answer key at the back, and it
+       steps forward if the picture will not load. */
+    body = '<div class="qText qFallback" id="qfb_' + it.n + '" hidden>' + esc(it.question) + '</div>';
+    opts = '';
+    /* Room to answer. A whole-question picture usually brings the paper's own
+       ruled space with it, so it gets the SHORT box rather than a second full
+       one — but never none: a box that was cropped tight would leave nowhere
+       to write, and blank paper is the cheaper mistake of the two. */
+    room = mcq
+      ? '<div class="qLine">Answer: <b>&nbsp;</b></div>'
+      : '<div class="qWork short"></div><div class="qLine">Answer: <b>&nbsp;</b></div>';
+  } else {
+    body = '<div class="qText">' + esc(it.question) + '</div>';
+    opts = mcq ? optsHtml(it) : '';
+    room = mcq
+      ? '<div class="qLine">Answer: <b>&nbsp;</b></div>'
+      : '<div class="qWork"></div><div class="qLine">Answer: <b>&nbsp;</b></div>';
+  }
+  const fig = tier === 'built' ? '' : figureFor(it);
+  return '<div class="q">' +
+    '<div class="qHead"><span class="qNum">' + it.n + '.</span>' +
+      (it.number ? '<span class="qMeta">was question ' + esc(it.number) + '</span>' : '') + '</div>' +
+    body + fig + opts + room +
+  '</div>';
+}
+function keyHtml(it) {
+  return '<div class="keyRow">' +
+    '<div class="keyNum">' + it.n + '.</div>' +
+    (it.answer ? '<div class="keyAns"><b>Answer:</b> ' + esc(it.answer) + '</div>' : '') +
+    (it.explanation ? '<div class="keyWhy">' + esc(it.explanation) + '</div>' : '') +
+    (it.studentAnswer ? '<div class="keyYou">Last time you wrote: ' + esc(it.studentAnswer) +
+      (it.feedback ? ' — ' + esc(it.feedback) : '') + '</div>' : '') +
+  '</div>';
+}
+function render() {
+  if (!paper) return;
+  const items = paper.items || [];
+  $('pTitle').textContent = paper.title || 'Try again';
+  $('pSub').textContent = items.length + ' question' + (items.length === 1 ? '' : 's') +
+    ' you got wrong, to try again. The answers are on the last page.';
+  $('modeClean').classList.toggle('on', mode === 'clean');
+  $('modeOriginal').classList.toggle('on', mode === 'original');
+  /* The note has to describe what is actually on the sheet, and the sheet can
+     hold all three tiers at once — one question set out again from the page,
+     the next cut whole out of the photograph, a third with only its figure.
+     Saying "these are cut out of your photographs" over a page of typeset
+     questions is the kind of small untruth that makes a student stop reading
+     the note at all, so it is built from the tiers really used. */
+  const tiers = items.map(tierOf);
+  const built = tiers.filter(t => t === 'built').length;
+  const wholes = tiers.filter(t => t === 'whole').length;
+  const lines = [];
+  if (built) {
+    lines.push('Your questions have been set out again from the photographs of your paper: the wording typed ' +
+      'out and the paper\u2019s own diagrams cut out and cleaned up, so nothing you wrote last time is still on them.');
+  }
+  if (wholes) {
+    lines.push((built ? 'Some are shown as the whole question cut out of your photograph and cleaned up' : 'These are your own questions, cut out of the photographs of your paper and cleaned up') +
+      ': your working rubbed out, the printing sharpened, and everything round the edges — a hand, the desk, ' +
+      'a shadow — whitened away.');
+  }
+  if (!built && !wholes) {
+    lines.push('The printing has been sharpened and your own working rubbed out, so the question is blank again. ' +
+      'The wording is exactly what was read off your paper — only the pictures are redrawn.');
+  }
+  lines.push('Nothing printed has been moved or reworded, so answer them exactly as they stand; if a question ' +
+    'ever looks wrong, switch to the original above and check it against the photograph.');
+  $('modeNote').textContent = mode === 'clean'
+    ? lines.join(' ')
+    : 'Every picture exactly as it was photographed, your own working and all.';
+
+  $('sheet').innerHTML =
+    '<div class="sheet">' +
+      '<div class="shHead">' +
+        '<div class="shTitle">' + esc(paper.title || 'Try again') + '</div>' +
+        '<div class="shOrg">Polymath Learning Centre · questions to try again</div>' +
+      '</div>' +
+      '<div class="shName"><span>Name:&nbsp;</span><span>Date:&nbsp;</span></div>' +
+      '<div class="shHow">When you have finished, <b>photograph this back into the Scan app</b> to have it ' +
+        'marked. Get a question right <b>twice in a row</b> and it comes out of your mistake book.</div>' +
+      items.map(questionHtml).join('') +
+    '</div>' +
+    '<div class="sheet keyPage">' +
+      '<div class="shHead"><div class="shTitle">Answers</div>' +
+      '<div class="shOrg">' + esc(paper.title || '') + '</div></div>' +
+      '<div style="margin-top:14px">' + items.map(keyHtml).join('') + '</div>' +
+    '</div>';
+}
+
+/* ---- Cleaning them, once ----
+   Done here rather than in the Scan app because this is where the image model
+   is, and done LAZILY rather than at send time so a paper nobody opens costs
+   nothing. The result is written back onto the paper, so it is paid for once
+   and every later visit — and the teacher's visit — is instant.
+
+   One at a time on purpose: these are big calls, they are being made on a
+   student's phone, and a row of them in parallel is how a page stalls. */
+/* WHICH PICTURES ARE ACTUALLY SHOWN — and therefore which are worth an AI
+   call. A question set out in blocks does not show its whole-question crop at
+   all, so cleaning that crop would be an image call, a Storage write and a
+   student's data spent on something nobody will ever see. `pictureSlots` is
+   the ONE place that is decided, and the renderer decides it the same way
+   (`tierOf`), so the two cannot drift into cleaning one picture and printing
+   another.
+
+   A slot is just "here is a picture, and here is where its cleaned copy is
+   kept" — the object is the block for a built question and the item itself for
+   a crop, which is what lets one loop clean both. The storage key for a crop
+   is unchanged, so a paper cleaned before blocks existed still finds its
+   pictures rather than paying for them twice. */
+function pictureSlots(it) {
+  const out = [];
+  if (tierOf(it) === 'built') {
+    questionBlocks(it).forEach((b, i) => {
+      if (b.type === 'image' && b.url) {
+        out.push({ obj: b, src: b.url, kind: 'figure', tag: it.n + '_b' + i, n: it.n });
+      }
+    });
+  } else if (it.img) {
+    out.push({ obj: it, src: it.img, kind: it.shot === 'question' ? 'question' : 'figure',
+               tag: String(it.n), n: it.n });
+  }
+  return out;
+}
+function paperPictures() {
+  const out = [];
+  (paper && paper.items || []).forEach(it => { pictureSlots(it).forEach(sl => out.push(sl)); });
+  return out;
+}
+
+async function cleanAll() {
+  if (cleaning || !paper) return;
+  const todo = paperPictures().filter(sl => !sl.obj.cleanImg);
+  if (!todo.length) return;
+  if (!imageAiReady()) {
+    cleanFail = todo.length;
+    $('modeNote').textContent = 'The clean-up is not available on this device, so the pictures are shown as ' +
+      'photographed. Everything else on the sheet is unchanged.';
+    return;
+  }
+  cleaning = true;
+  $('prog').classList.add('on');
+  let done = 0, failed = 0;
+  const step = () => {
+    $('progFill').style.width = Math.round(done / todo.length * 100) + '%';
+    $('progText').textContent = 'Cleaning up picture ' + Math.min(done + 1, todo.length) + ' of ' + todo.length + '…';
+  };
+  step();
+  for (const sl of todo) {
+    try {
+      const src = await urlToDataUrl(sl.src);
+      const out = await cleanFigure(src, sl.kind);
+      let url = out;
+      // Keep it, so this is paid for once. A Storage or rules refusal is not
+      // a failure of the clean-up — the picture is already in hand and is
+      // shown; it will simply be made again on the next visit.
+      try {
+        const ref = sRef(storage, IMG_PATH + '/' + paper.owner + '/clean_' + paperId + '_' + sl.tag + '.png');
+        await uploadString(ref, out, 'data_url');
+        url = await getDownloadURL(ref);
+      } catch (e) { console.warn('cleaned picture could not be kept', e); }
+      sl.obj.cleanImg = url;
+      try { await updateDoc(doc(db, PAPER_COL, paperId), { items: paper.items }); }
+      catch (e) { console.warn('paper could not be updated', e); }
+    } catch (e) {
+      console.warn('picture ' + sl.tag + ' could not be cleaned', e);
+      failed++;
+    }
+    done++;
+    step();
+    render();
+  }
+  cleaning = false;
+  cleanFail = failed;
+  $('prog').classList.remove('on');
+  render();
+  if (failed) {
+    $('modeNote').textContent = failed + ' picture' + (failed === 1 ? '' : 's') +
+      ' could not be cleaned up and ' + (failed === 1 ? 'is' : 'are') + ' shown as photographed. ' +
+      'Everything else on the sheet is unchanged.';
+  }
+}
+
+/* ---- Wiring ---- */
+$('modeClean').addEventListener('click', () => { mode = 'clean'; render(); cleanAll(); });
+$('modeOriginal').addEventListener('click', () => { mode = 'original'; render(); });
+$('printBtn').addEventListener('click', () => window.print());
+$('signInBtn').addEventListener('click', () => window.__signIn());
+$('signOutBtn').addEventListener('click', () => signOut(auth));
+
+/* The picture is the question, so if it will not load the wording has to take
+   over — a numbered question with nothing under it is the one thing a sheet
+   like this must never print. */
+window.__figFailed = (n) => {
+  const fig = $('fig_' + n), fb = $('qfb_' + n);
+  if (fig) fig.hidden = true;
+  if (fb) fb.hidden = false;
+};
+
+/* A figure inside a question that has been set out again is the other way
+   round: the wording is typeset above and below it, so a picture that will not
+   load takes itself off the page and the question still reads. */
+window.__blkFailed = (n, i) => {
+  const el = $('blk_' + n + '_' + i);
+  if (el) el.hidden = true;
+};
+
+window.__signIn = () => {
+  const provider = new GoogleAuthProvider();
+  signInWithPopup(auth, provider).catch(e => {
+    if (e && (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment')) {
+      signInWithRedirect(auth, provider);
+      return;
+    }
+    if (e && e.code === 'auth/popup-closed-by-user') return;
+    gate('Could not sign in: ' + esc((e && e.message) || e),
+      '<button class="btn primary" onclick="window.__signIn()">Try again</button>');
+  });
+};
+
+onAuthStateChanged(auth, u => {
+  user = u || null;
+  $('signInBtn').classList.toggle('hidden', !!user);
+  $('signOutBtn').classList.toggle('hidden', !user);
+  $('whoAmI').textContent = user ? (user.displayName || user.email || '') : '';
+  // A different account must never be left looking at the last one's paper.
+  paper = null;
+  open();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,1013 @@
+diff --git a/README.md b/README.md
+index c7ce1b9..56ffd4c 100644
+--- a/README.md
++++ b/README.md
+@@ -12,7 +12,7 @@ Play at [polymathlc.github.io/hades](https://polymathlc.github.io/hades/).
+ | Aim | Mouse | Movement direction / nearby enemies |
+ | Strike | Hold left click or J | Hold Strike |
+ | Special | Hold right click or K | Hold Special |
+-| Cast | Q or E | Cast |
++| Cast at cursor; press again to detonate | Q or E | Cast (assisted aim) |
+ | Dash | Space or Shift | Dash |
+ | Hex | F | Hex |
+ | Boons | Tab or B | Boons button |
+@@ -69,3 +69,15 @@ Tests include real parent/iframe checkpoints, five-question grading, actual heal
+ ## Release 2.1.2: Ground summoning circle
+ 
+ Cast places a detailed SVG inscription on the floor: concentric engraved rings, varied runes, cardinal anchors and a geometric central sigil. The boundary matches the spell’s reach and stays fixed while the inner rune bands counter-rotate. Scenery and combat actors render above the cast and its circular detonation. Reduced motion freezes the rune animation.
++
++## Release 2.2.0: Student beta and premium presentation
++
++Etched stonework, animated pillar lights, orbiting reward-gate rings, spectral dash silhouettes and metallic menu treatments add depth without changing combat hitboxes. Cosmetic work is bounded; environmental animation uses simulation time and freezes with reduced motion.
++
++Hades is available to signed-in students in Science and Math with the BETA label retained. Student rounds use the active learner’s school level and separate account history; administrators retain level-selectable previews. Science records bank attempts through its existing game history. Math top-level MCQs are marked by the portal’s existing authenticated `markAttempt` service: private keys are never loaded by the student client or sent to the iframe. Existing block MCQs remain parent-graded. Failed, stale or malformed remote results cannot advance a sanctuary round.
++
++## Release 2.2.1: Precise casting and combat feedback
++
++Q/E captures the floor beneath the mouse or pen cursor immediately, even after camera movement, screen shake, layout scaling or resizing. Moving or aiming afterward leaves the summoning circle at that world position; pressing Cast again detonates it. Keyboard-only and touch players keep assisted aim.
++
++Desktop and touch ability indicators show cast lifetime and detonation availability, low Magick, strike/special/dash cooldowns and Hex charge. Doom now resolves during sustained attacks, Chill pulses keep consistent timing and preserve longer freezes, Blizzard pulls respect pillars, and dash travel and knockback follow the actual movement direction. Existing premium presentation and parent-owned learning integrations remain included in the source used to reproduce the portal builds.
+diff --git a/generate_game.py b/generate_game.py
+index c962c75..ce1166e 100644
+--- a/generate_game.py
++++ b/generate_game.py
+@@ -31,7 +31,7 @@ print(f"Loaded {len(b64_data)} assets into memory.")
+ SOURCE_FILES = ['runtime.js', 'attack-svg-art.js', 'learning.js', 'data.js', 'player.js', 'enemies.js', 'effects.js', 'world.js', 'flow.js', 'boon-effects.js', 'loop.js', 'render.js', 'startup.js']
+ source_root = ROOT / 'src'
+ html_template = (source_root / 'index.template.html').read_text(encoding='utf-8')
+-styles = '\n'.join((source_root / name).read_text(encoding='utf-8') for name in ['styles.css', 'runtime.css', 'learning.css'])
++styles = '\n'.join((source_root / name).read_text(encoding='utf-8') for name in ['styles.css', 'runtime.css', 'learning.css', 'premium.css'])
+ final_html = html_template.replace('%STYLES%', styles)
+ final_html = final_html.replace('%SCRIPTS%', '\n'.join((source_root / name).read_text(encoding='utf-8') for name in SOURCE_FILES))
+ final_html = final_html.replace('%ASSETS_JSON%', json.dumps(b64_data))
+diff --git a/learning-parent.js b/learning-parent.js
+index 181b393..0f9f27a 100644
+--- a/learning-parent.js
++++ b/learning-parent.js
+@@ -14,13 +14,13 @@ export function hadesLearningRewardSummary(correct) {
+   const tier = reward.boonTier[0].toUpperCase() + reward.boonTier.slice(1);
+   return `${correct}/5 correct · Restore ${reward.healPercent}% maximum life · ${tier}: next scalable boon Lv ${rank}, or Pom +${rank} ${rank === 1 ? 'level' : 'levels'}.`;
+ }
+-export function validHadesQuestions(rows) {
++export function validHadesQuestions(rows, allowRemote = false) {
+   const seen = new Set();
+   return (Array.isArray(rows) ? rows : []).filter(q => {
+     if (!q || typeof q.id !== 'string' || !q.id || seen.has(q.id) || typeof q.html !== 'string' || !q.html.trim()
+       || !Array.isArray(q.options) || q.options.length < 2 || q.options.length > 8
+       || q.options.some(option => typeof option !== 'string' || !option.trim())
+-      || !Number.isInteger(q.answer) || q.answer < 0 || q.answer >= q.options.length) return false;
++      || (!(allowRemote && q.grading === 'remote') && (!Number.isInteger(q.answer) || q.answer < 0 || q.answer >= q.options.length))) return false;
+     seen.add(q.id); return true;
+   }).slice(0, HADES_QUESTION_COUNT);
+ }
+@@ -64,7 +64,7 @@ export function createHadesLearningController(config) {
+     const blocked = message => send(s.source, { type: 'HADES_ROUND_BLOCKED', requestId: d.requestId,
+       sessionId: s.id, round: d.round, message });
+     try {
+-      const questions = validHadesQuestions(await config.getQuestions());
++      const questions = validHadesQuestions(await config.getQuestions(), typeof config.gradeQuestion === 'function');
+       if (!current(s) || revision !== generation) return false;
+       if (questions.length !== HADES_QUESTION_COUNT) {
+         blocked('Five fresh, suitable questions are needed. Try again later or choose another preview level.');
+@@ -73,13 +73,22 @@ export function createHadesLearningController(config) {
+       // Reserve the set together so another mode cannot serve an unseen tail
+       // while this round is being answered. Abandonment never grants a reward.
+       for (const q of questions) config.markShown?.(q);
+-      let index = 0, correct = 0;
++      let index = 0, correct = 0, marking = false;
+       const graded = new Map();
+       const grade = async (questionIndex, choice, ms) => {
+-        if (!current(s) || revision !== generation || questionIndex !== index || !Number.isInteger(choice)) return null;
++        if (marking || !current(s) || revision !== generation || questionIndex !== index || !Number.isInteger(choice)) return null;
+         const q = questions[index]; if (!q || choice < 0 || choice >= q.options.length) return null;
+         if (graded.has(index)) return graded.get(index);
+-        const result = { correct: choice === q.answer, answer: q.answer, explainHtml: q.explainHtml || '' };
++        let result;
++        if (q.grading === 'remote') {
++          marking = true;
++          try { result = await config.gradeQuestion({ question: q, choice, round: d.round, sessionId: s.id }); }
++          finally { marking = false; }
++          if (!current(s) || revision !== generation) return null;
++          if (!result || typeof result.correct !== 'boolean' || !Number.isInteger(result.answer)
++            || result.answer < 0 || result.answer >= q.options.length || result.correct !== (choice === result.answer))
++            throw new Error('No valid marking result was returned.');
++        } else result = { correct: choice === q.answer, answer: q.answer, explainHtml: q.explainHtml || '' };
+         // Claim before the write: rapid clicks cannot double-count history.
+         graded.set(index, result); if (result.correct) correct++;
+         index++;
+@@ -211,7 +220,15 @@ export function installHadesLearningParent(config) {
+         button.onclick = async () => {
+           if (selected || failed || !isCurrent()) return;
+           selected = true; buttons.forEach(b => { b.disabled = true; });
+-          const answer = await grade(index,choice,performance.now()-started);
++          let answer;
++          feedback.textContent = 'Checking your answer…';
++          try { answer = await grade(index,choice,performance.now()-started); }
++          catch (_) {
++            if (!isCurrent()) return;
++            failed = true; warning.hidden = false;
++            warning.textContent = 'We could not confirm this answer. Return to the game and try a new sanctuary round when your connection is ready.';
++            feedback.textContent = ''; return;
++          }
+           if (!answer || !isCurrent()) { close(); return; }
+           if (answer.correct) score++;
+           buttons[answer.answer].dataset.correct = 'true'; if (!answer.correct) button.dataset.wrong = 'true';
+diff --git a/package-lock.json b/package-lock.json
+index 08b0b24..56d9f3d 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "chronos-fall",
+-  "version": "2.1.2",
++  "version": "2.2.1",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "chronos-fall",
+-      "version": "2.1.2",
++      "version": "2.2.1",
+       "devDependencies": {
+         "playwright": "1.62.1"
+       }
+diff --git a/package.json b/package.json
+index bd98723..bd463f8 100644
+--- a/package.json
++++ b/package.json
+@@ -1,13 +1,13 @@
+ {
+   "name": "chronos-fall",
+-  "version": "2.1.2",
++  "version": "2.2.1",
+   "private": true,
+   "type": "module",
+   "scripts": {
+     "build": "python generate_game.py",
+     "check:build": "python generate_game.py --check",
+     "test": "node --test tools/*.test.mjs && node tools/test-gameplay.cjs",
+-    "test:browser": "node tools/browser-check.mjs && node tools/runtime-browser-check.mjs && node tools/graphics-check.mjs && node tools/stress-check.mjs && node tools/svg-art-check.mjs && node tools/cast-ground-browser-check.mjs && node tools/learning-browser-check.mjs"
++    "test:browser": "node tools/browser-check.mjs && node tools/runtime-browser-check.mjs && node tools/graphics-check.mjs && node tools/stress-check.mjs && node tools/svg-art-check.mjs && node tools/cast-ground-browser-check.mjs && node tools/learning-browser-check.mjs && node tools/premium-browser-check.mjs && node tools/cursor-cast-browser-check.mjs && node tools/ability-hud-browser-check.mjs"
+   },
+   "devDependencies": {
+     "playwright": "1.62.1"
+diff --git a/src/boon-effects.js b/src/boon-effects.js
+index e497f7b..1cc1d48 100644
+--- a/src/boon-effects.js
++++ b/src/boon-effects.js
+@@ -139,7 +139,8 @@
+             if (hasBoon('poseidon_undertow') || hasBoon('poseidon_dash')) {
+               const damage = (hasBoon('poseidon_undertow') ? 60 * boonPower('poseidon_undertow') : 0) + (hasBoon('poseidon_dash') ? 50 * boonPower('poseidon_dash') : 0);
+               enemy.takeDamage(damage, 'wave');
+-              enemy.moveWithCollision(Math.cos(player.angle) * 75, Math.sin(player.angle) * 75);
++              const dashAngle = Math.atan2(player.dashVy, player.dashVx);
++              enemy.moveWithCollision(Math.cos(dashAngle) * 75, Math.sin(dashAngle) * 75);
+             }
+           }
+         }
+@@ -159,12 +160,19 @@
+         if (hasBoon('selene_gravity')) clearHostileBullets(cast.x, cast.y, cast.radius);
+         if (hasBoon('ares_engulf')) cast.radius = cast.baseRadius * (1 + 0.4 * (1 - Math.max(0, cast.timer) / 2.5));
+         state.castTick = (state.castTick || 0) - dt;
+-        const tick = state.castTick <= 0;
+-        if (tick) state.castTick = hasBoon('zeus_fury') ? 0.32 : 0.4;
++        const tick = state.castTick <= 1e-9;
++        if (tick) state.castTick += hasBoon('zeus_fury') ? 0.32 : 0.4;
+         for (const enemy of gameState.enemies.slice()) {
+-          if (Math.hypot(enemy.x-cast.x, enemy.y-cast.y) > cast.radius) continue;
++          const distance = Math.hypot(enemy.x-cast.x, enemy.y-cast.y);
++          const inBlizzard = hasBoon('duo_blizzard') && distance < 240;
++          if (inBlizzard && distance > 0) {
++            const pull = Math.min(75 * dt, distance) / distance;
++            enemy.moveWithCollision((cast.x-enemy.x)*pull, (cast.y-enemy.y)*pull);
++          }
++          // A field applies one Chill stack per pulse, including overlapping boons.
++          if (tick && (inBlizzard || (hasBoon('demeter_ring') && distance <= cast.radius))) enemy.applyChill(0.6);
++          if (distance > cast.radius) continue;
+           if (hasBoon('ares_engulf')) enemy.moveWithCollision((cast.x-enemy.x)*dt, (cast.y-enemy.y)*dt);
+-          if (hasBoon('demeter_ring')) enemy.applyChill(0.6);
+           if (tick && hasBoon('zeus_ring')) procChainLightning(enemy, 22 * boonPower('zeus_ring'));
+           if (tick && hasBoon('hestia_ring')) enemy.applyScorch(12 * boonPower('hestia_ring'));
+           if (tick && hasBoon('apollo_ring')) { enemy.blindTimer = 1; enemy.takeDamage(12 * boonPower('apollo_ring'), 'solar'); }
+diff --git a/src/enemies.js b/src/enemies.js
+index 7b20724..6c2148c 100644
+--- a/src/enemies.js
++++ b/src/enemies.js
+@@ -101,7 +101,8 @@
+           if (this.weakTimer <= 0) this.isWeak = false;
+         }
+ 
+-        let moveSpeed = this.speed * speedMult;
++        // effectiveDt already applies Chill and time dilation to movement.
++        let moveSpeed = this.speed;
+         if (player.castActive) {
+           const dToCast = Math.hypot(this.x - player.castActive.x, this.y - player.castActive.y);
+           if (dToCast <= player.castActive.radius) {
+@@ -684,14 +685,19 @@
+ 
+       applyChill(duration) {
+         if (this.dead) return;
+-        this.chillStacks++;
+-        this.chillTimer = duration;
++        this.chillStacks = Math.min(5, this.chillStacks + 1);
++        this.chillTimer = Math.max(this.chillTimer, duration);
+       }
+ 
+       applyDoom(amount) {
+         if (this.dead) return;
+-        this.doomDamage = amount * (hasBoon('ares_impending') ? 1.8 : 1);
+-        this.doomTimer = hasBoon('ares_impending') ? 1.5 : 1.1;
++        const damage = amount * (hasBoon('ares_impending') ? 1.8 : 1);
++        // Sustained combos may strengthen pending Doom, but never postpone it.
++        if (this.doomTimer > 0) this.doomDamage = Math.max(this.doomDamage, damage);
++        else {
++          this.doomDamage = damage;
++          this.doomTimer = hasBoon('ares_impending') ? 1.5 : 1.1;
++        }
+       }
+ 
+       takeDamage(amount, source = 'normal', silent = false) {
+diff --git a/src/index.template.html b/src/index.template.html
+index 047ec26..1a5f610 100644
+--- a/src/index.template.html
++++ b/src/index.template.html
+@@ -3,7 +3,7 @@
+ <head>
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+-  <meta name="application-version" content="2.1.2" />
++  <meta name="application-version" content="2.2.1" />
+   <meta name="theme-color" content="#08131b" />
+   <title>HADES II: Chronos Fall — Endless Descent</title>
+   <link rel="preconnect" href="https://fonts.googleapis.com">
+@@ -53,7 +53,7 @@
+         <span><span class="key-badge">WASD</span> Move</span>
+         <span><span class="key-badge">L-CLICK / J</span> Strike</span>
+         <span><span class="key-badge">R-CLICK / K</span> Special</span>
+-        <span><span class="key-badge">Q / E</span> Cast</span>
++        <span><span class="key-badge">Q / E</span> Cast at cursor · again to burst</span>
+         <span><span class="key-badge">SPACE</span> Dash</span>
+         <span><span class="key-badge">F</span> Hex</span>
+         <span><span class="key-badge">TAB</span> Boons Codex</span>
+@@ -63,22 +63,22 @@
+       <!-- Bottom HUD -->
+       <div class="bottom-hud">
+         <div class="abilities-cluster">
+-          <div class="ability-slot active">
++          <div class="ability-slot active" data-ability="strike">
+             <div class="ability-key">L-CLICK</div>
+             <div class="ability-icon"><svg class="ui-glyph" viewBox="0 0 36 36" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="m9 25 15-15 5-2-2 5-15 15m-4-5 8 8M7 30l-3 3m19-22 3 3"/></svg></div>
+             <div class="ability-name">Strike</div>
+           </div>
+-          <div class="ability-slot active">
++          <div class="ability-slot active" data-ability="special">
+             <div class="ability-key">R-CLICK</div>
+             <div class="ability-icon"><svg class="ui-glyph" viewBox="0 0 36 36" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M27 5a14 14 0 1 0 5 22A13 13 0 0 1 27 5Z"/><path d="m10 8 2-4 2 4 4 2-4 2-2 4-2-4-4-2Z"/></svg></div>
+             <div class="ability-name">Special</div>
+           </div>
+-          <div class="ability-slot active">
++          <div class="ability-slot active" data-ability="cast">
+             <div class="ability-key">Q</div>
+             <div class="ability-icon"><svg class="ui-glyph" viewBox="0 0 36 36" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><circle cx="18" cy="18" r="13"/><circle cx="18" cy="18" r="9"/><path d="m18 8 9 15H9Zm0-6v3m0 26v3M2 18h3m26 0h3"/></svg></div>
+             <div class="ability-name">Cast</div>
+           </div>
+-          <div class="ability-slot active">
++          <div class="ability-slot active" data-ability="dash">
+             <div class="ability-key">SPACE</div>
+             <div class="ability-icon"><svg class="ui-glyph" viewBox="0 0 36 36" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="m13 7 13 11-13 11m7-22 13 11-13 11M3 11h9M1 18h14M3 25h9"/></svg></div>
+             <div class="ability-name">Dash</div>
+@@ -94,7 +94,7 @@
+         </div>
+ 
+         <!-- Selene Hex Gauge -->
+-        <div id="hex-gauge" class="hex-circle">
++        <div id="hex-gauge" class="hex-circle" data-ability="hex">
+           <div class="ability-key">F</div>
+           <div class="hex-emblem"><svg class="ui-glyph" viewBox="0 0 36 36" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M27 5a14 14 0 1 0 5 22A13 13 0 0 1 27 5Z"/><path d="m10 8 2-4 2 4 4 2-4 2-2 4-2-4-4-2Z"/></svg></div>
+           <div style="font-size: 9px; font-family: var(--font-title); color: #c084fc; font-weight: 700;">HEX</div>
+diff --git a/src/loop.js b/src/loop.js
+index a54f48c..66cf5a9 100644
+--- a/src/loop.js
++++ b/src/loop.js
+@@ -148,12 +148,14 @@
+       ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.save();
+       // A resize can make the previous camera offset invalid immediately.
+       Object.assign(gameState.camera, clampedCameraTarget(gameState.camera.x, gameState.camera.y));
++      gameRuntime.viewShake.x = shakeX; gameRuntime.viewShake.y = shakeY;
+       ctx.translate(canvas.width / 2 - gameState.camera.x + shakeX, canvas.height / 2 - gameState.camera.y + shakeY);
+       drawChamberTiles(ctx);
+       // A cast is a world-anchored inscription: scenery and actors cover it.
+       if (typeof drawSvgCast === 'function') drawSvgCast(ctx, player.castActive);
+       for (const p of gameState.particles) if (isGroundEffect(p)) p.draw(ctx);
+       drawProps(ctx, worldTime);
++      if (typeof drawPremiumAtmosphere === 'function') drawPremiumAtmosphere(ctx, worldTime);
+       if (typeof drawCombatReadability === 'function') drawCombatReadability(ctx, worldTime);
+       if (typeof drawBoonEffects === 'function') drawBoonEffects(ctx);
+       for (const e of gameState.enemies) e.draw(ctx);
+diff --git a/src/player.js b/src/player.js
+index e375458..47ee722 100644
+--- a/src/player.js
++++ b/src/player.js
+@@ -114,8 +114,9 @@
+         this.angle = Math.atan2(worldMouseY - this.y, worldMouseX - this.x);
+ 
+         if (this.isDashing) {
+-          this.dashTimer -= dt;
+-          this.moveWithCollision(this.dashVx * dt, this.dashVy * dt);
++          const dashStep = Math.min(dt, this.dashTimer);
++          this.dashTimer = Math.max(0, this.dashTimer - dt);
++          this.moveWithCollision(this.dashVx * dashStep, this.dashVy * dashStep);
+           if (Math.random() < 0.8) {
+             gameState.particles.push(new Particle(this.x + (Math.random()-0.5)*20, this.y + (Math.random()-0.5)*20, 0, 0, '#2ae6b4', 18, 0.3, 'ghost'));
+           }
+@@ -166,18 +167,6 @@
+           this.castActive.timer -= dt;
+           this.castActive.angle += dt * 1.2;
+ 
+-          if (hasBoon('duo_blizzard')) {
+-            gameState.enemies.slice().forEach(e => {
+-              const d = Math.hypot(e.x - this.castActive.x, e.y - this.castActive.y);
+-              if (d < 240) {
+-                const ang = Math.atan2(this.castActive.y - e.y, this.castActive.x - e.x);
+-                e.x += Math.cos(ang) * 75 * dt;
+-                e.y += Math.sin(ang) * 75 * dt;
+-                e.applyChill(0.5);
+-              }
+-            });
+-          }
+-
+           if (this.castActive.timer <= 0) {
+             this.detonateCast();
+           }
+@@ -637,6 +626,17 @@
+         ctx.save();
+         ctx.translate(this.x, this.y);
+ 
++        // A bounded set of spectral silhouettes follows the dash direction.
++        const heroTrail = loadedImages.hero;
++        if (this.isDashing && !graphicsReducedMotion() && usableArtwork(heroTrail)) {
++          const angle = Math.atan2(this.dashVy, this.dashVx), cw = heroTrail.width / 4, ch = heroTrail.height / 4;
++          for (let i = 3; i > 0; i--) {
++            ctx.save(); ctx.translate(-Math.cos(angle) * i * 16, -Math.sin(angle) * i * 16);
++            ctx.globalAlpha = .08 + (3 - i) * .04;
++            if (Math.cos(this.angle) < 0) ctx.scale(-1,1);
++            ctx.drawImage(heroTrail, this.animFrame*cw+8, this.animRow*ch+8, cw-16, ch-16, -52,-66,105,105); ctx.restore();
++          }
++        }
+         // Character glowing aura
+         ctx.beginPath();
+         ctx.arc(0, 0, 32, 0, Math.PI * 2);
+diff --git a/src/premium.css b/src/premium.css
+new file mode 100644
+index 0000000..2a4ba66
+--- /dev/null
++++ b/src/premium.css
+@@ -0,0 +1,18 @@
++/* Engraved glass and warm metallic highlights; geometry stays HUD-safe. */
++.runtime-panel{position:relative;isolation:isolate;overflow:hidden;border-color:#d3b777;box-shadow:0 28px 100px #000c,inset 0 0 0 5px #c7a76812,inset 0 1px #fff1;background:radial-gradient(ellipse at 50% 0,#31515399,transparent 64%),linear-gradient(145deg,#152b34fa,#070f1cfb)}
++.runtime-panel::before{content:"";position:absolute;width:440px;height:440px;left:50%;top:-285px;margin-left:-220px;border:1px solid #ddb97455;border-radius:50%;box-shadow:0 0 0 17px #dab86d0a,0 0 0 43px #dab86d08;z-index:-1;pointer-events:none;animation:sanctuary-halo 18s linear infinite;background:repeating-conic-gradient(from 0deg,transparent 0deg 14deg,#b9e8df33 14deg 15deg,transparent 15deg 30deg)}
++.runtime-panel::after{content:"";position:absolute;inset:10px;border:1px solid #b9d4cb15;border-radius:14px;pointer-events:none;z-index:-1}
++.runtime-eyebrow{color:#afe9d8;text-shadow:0 0 18px #68d7b866}
++.runtime-primary{background:linear-gradient(115deg,#b99550,#f4dfa6 45%,#c4a568);box-shadow:0 6px 22px #cbaa4f28,inset 0 1px #fff9;transition:filter .18s,transform .18s,box-shadow .18s}
++.runtime-primary:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 10px 30px #cbaa4f40}
++.runtime-primary:active:not(:disabled){transform:translateY(1px)}
++.stat-bar-container,.currency-panel,.ability-slot{box-shadow:0 5px 18px #0007,inset 0 1px #f8e5b521}
++.health-fill,.magick-fill{background-size:160% 100%;box-shadow:inset 0 1px #fff5}
++.boon-card{overflow:hidden;border-color:#b4bca166;box-shadow:0 10px 22px #0003,inset 0 1px #ffffff0c;animation:divine-arrival .4s both}
++.boon-card:nth-child(2){animation-delay:.06s}.boon-card:nth-child(3){animation-delay:.12s}
++.boon-card::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 15%,#fff1 45%,transparent 65%);transform:translateX(-110%);transition:transform .6s}
++.boon-card:hover::after,.boon-card:focus-visible::after{transform:translateX(110%)}
++.boon-card-name{text-shadow:0 2px 10px #0008}.dialogue-portrait-canvas{box-shadow:0 0 0 5px #d6bc7e0c,0 0 0 6px #d6bc7e22,0 8px 28px #0006}
++@keyframes divine-arrival{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
++@keyframes sanctuary-halo{to{transform:rotate(360deg)}}
++@media(prefers-reduced-motion:reduce){.runtime-panel::before,.boon-card{animation:none}.boon-card::after,.runtime-primary{transition:none}}
+diff --git a/src/render.js b/src/render.js
+index 5010bad..ca63c7e 100644
+--- a/src/render.js
++++ b/src/render.js
+@@ -58,6 +58,23 @@ function buildChamberArtwork() {
+   const light = c.createRadialGradient(0, -40, 30, 0, 0, w);
+   light.addColorStop(0, '#c0ebd911'); light.addColorStop(0.62, '#02070c05'); light.addColorStop(1, '#02070c99');
+   c.fillStyle = light; c.fillRect(-w, -h, arena.width, arena.height);
++  // Inlaid octagonal dais, etched radial channels and worn masonry are cached.
++  c.save(); c.strokeStyle = palette.gold + '24';
++  for (const radius of [275, 286, 355]) {
++    c.beginPath();
++    for (let i = 0; i < 8; i++) { const a = (i + .5) * Math.PI / 4; const x = Math.cos(a) * radius, y = Math.sin(a) * radius; if (i) c.lineTo(x,y); else c.moveTo(x,y); }
++    c.closePath(); c.stroke();
++  }
++  for (let i = 0; i < 48; i++) {
++    const a = i * Math.PI / 24; c.beginPath();
++    c.moveTo(Math.cos(a) * 289, Math.sin(a) * 289); c.lineTo(Math.cos(a) * (i % 4 ? 298 : 319), Math.sin(a) * (i % 4 ? 298 : 319)); c.stroke();
++  }
++  c.strokeStyle = '#a3c4be0b';
++  for (let i = 0; i < 150; i++) {
++    const x = Math.sin(i * 89.3) * w, y = Math.cos(i * 31.7) * h;
++    c.beginPath(); c.moveTo(x,y); c.lineTo(x+9,y+3); c.lineTo(x+15,y-2); c.stroke();
++  }
++  c.restore();
+   drawMoonSigil(c, 0, 0, 250, palette.gold + '33');
+   for (const x of [-w + 75, w - 75]) {
+     for (const y of [-h + 80, h - 80]) drawMoonSigil(c, x, y, 29, palette.gold + '60');
+@@ -116,6 +133,7 @@ function drawProps(ctx, time) {
+     const door = gameState.doors[idx], reward = door.reward;
+     const near = Math.hypot(player.x - door.x, player.y - door.y) < 160;
+     const accent = reward.type === 'heart' ? '#ffafb2' : reward.type === 'god' ? '#8aefd8' : '#efd398';
++    drawPremiumGate(ctx, door, accent, motionTime);
+     const bob = Math.sin(motionTime / 650 + idx * 2) * (reduced ? 0 : 3);
+     ctx.save(); ctx.translate(door.x, door.y);
+     ctx.strokeStyle = accent; ctx.fillStyle = '#07131ced'; ctx.lineWidth = near ? 3 : 1.5;
+@@ -163,4 +181,93 @@ function drawCombatReadability(ctx) {
+ }
+ function drawScreenAtmosphere(ctx) {
+   // The screen vignette lives in CSS, not a full-screen per-frame gradient.
++  updateAbilityReadiness();
++}
++
++// Cache both nodes and displayed values: cooldowns change in tenths of a
++// second, so the HUD does not rewrite the DOM on every animation frame.
++let abilityReadinessNodes;
++function updateAbilityReadiness() {
++  if (!abilityReadinessNodes) {
++    abilityReadinessNodes = new Map();
++    for (const action of ['strike', 'special', 'cast', 'dash', 'hex']) {
++      const nodes = [...document.querySelectorAll(`[data-ability="${action}"], .touch-action[data-action="${action}"]`)];
++      abilityReadinessNodes.set(action, nodes.map(node => {
++        const label = document.createElement('span');
++        label.className = 'ability-status';
++        node.appendChild(label);
++        return {node, label, value: ''};
++      }));
++    }
++  }
++  const cooldown = value => value > 0 ? `${(Math.ceil(value * 10) / 10).toFixed(1)}s` : 'Ready';
++  const cast = player.castActive;
++  const statuses = {
++    strike: {text: player.isDashing ? 'Dashing' : cooldown(player.attackTimer), ready: !player.isDashing && player.attackTimer <= 0},
++    special: {text: cooldown(player.specialCooldown), ready: player.specialCooldown <= 0},
++    cast: cast ? {text: `${Math.max(0, cast.timer).toFixed(1)}s · Burst`, ready: true, active: true}
++      : {text: player.magick >= 15 ? '15 Magick' : 'Low Magick', ready: player.magick >= 15},
++    dash: {text: cooldown(player.dashCooldown), ready: player.dashCooldown <= 0},
++    hex: {text: player.hexCharge >= player.hexMax ? 'Ready' : `${Math.floor(player.hexCharge / player.hexMax * 100)}%`, ready: player.hexCharge >= player.hexMax}
++  };
++  for (const [action, entries] of abilityReadinessNodes) {
++    const state = statuses[action];
++    const mode = state.active ? 'active' : state.ready ? 'ready' : 'waiting';
++    const value = `${mode}:${state.text}`;
++    for (const entry of entries) {
++      if (entry.value === value) continue;
++      entry.value = value;
++      entry.label.textContent = state.text;
++      entry.node.dataset.readiness = mode;
++      entry.node.title = action === 'cast' && cast ? 'Press Cast again to detonate the circle now.' : `${action}: ${state.text}`;
++    }
++  }
++}
++
++// Fixed-cost light ribbons and sparks use simulation time, never new particles.
++function drawPremiumAtmosphere(c, time) {
++  const palette = chamberPalette(), t = graphicsReducedMotion() ? 0 : time / 1000;
++  c.save(); c.globalCompositeOperation = 'lighter';
++  for (const pillar of arena.pillars) {
++    if (Math.abs(pillar.x - gameState.camera.x) > canvas.width / 2 + 150 || Math.abs(pillar.y - gameState.camera.y) > canvas.height / 2 + 220) continue;
++    c.save(); c.translate(pillar.x, pillar.y - 136);
++    const pulse = 1 + Math.sin(t * 1.8 + pillar.x) * .08;
++    c.scale(pulse, pulse); c.strokeStyle = palette.glow; c.lineWidth = 1;
++    c.globalAlpha = .24;
++    for (let ring = 0; ring < 2; ring++) {
++      c.beginPath(); c.ellipse(0, 0, 20 + ring * 11, 7 + ring * 4, t * .12 * (ring ? -1 : 1), 0, Math.PI * 2); c.stroke();
++    }
++    c.globalAlpha = .55;
++    for (let i = 0; i < 5; i++) {
++      const phase = (t * .22 + i / 5) % 1;
++      c.fillStyle = palette.glow; c.globalAlpha = Math.sin(phase * Math.PI) * .5;
++      c.fillRect(Math.sin(i * 3 + t) * 14, -phase * 62, 2, 3);
++    }
++    c.restore();
++  }
++  // Two quiet layers add depth without obscuring silhouettes or damage warnings.
++  for (let i = 0; i < 28; i++) {
++    const x = Math.sin(i * 127.1) * arena.width * .46 + Math.sin(t * .19 + i) * 18;
++    const y = Math.cos(i * 311.7) * arena.height * .44 - ((t * 5 + i * 19) % 90);
++    c.globalAlpha = .09 + (Math.sin(t * .6 + i) + 1) * .06;
++    c.fillStyle = i % 3 ? palette.glow : '#f7d99a';
++    c.beginPath(); c.arc(x, y, i % 4 ? 1 : 2, 0, Math.PI * 2); c.fill();
++  }
++  c.restore();
++}
++function drawPremiumGate(c, door, accent, time) {
++  const t = graphicsReducedMotion() ? 0 : time / 1000;
++  c.save(); c.translate(door.x, door.y - 45); c.globalCompositeOperation = 'lighter';
++  c.strokeStyle = accent; c.lineWidth = 1.2;
++  for (let ring = 0; ring < 3; ring++) {
++    c.save(); c.scale(1, 1.3); c.rotate(t * (ring % 2 ? -.14 : .12) + ring);
++    c.globalAlpha = .2 + ring * .06;
++    c.beginPath(); c.arc(0, 0, 43 + ring * 7, .2, Math.PI * 1.8); c.stroke();
++    for (let i = 0; i < 8; i++) {
++      const a = i * Math.PI / 4, r = 43 + ring * 7;
++      c.beginPath(); c.moveTo(Math.cos(a) * (r - 2), Math.sin(a) * (r - 2)); c.lineTo(Math.cos(a) * (r + 2), Math.sin(a) * (r + 2)); c.stroke();
++    }
++    c.restore();
++  }
++  c.restore();
+ }
+diff --git a/src/runtime.css b/src/runtime.css
+index 63601b7..e28838b 100644
+--- a/src/runtime.css
++++ b/src/runtime.css
+@@ -31,6 +31,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid #89eddd; outline-
+ .touch-action.is-held { background: #437d79; box-shadow: 0 0 18px #7eebbd6b; transform: scale(.96); }
+ .touch-strike { grid-column: span 2; color: #fff0c1; border-color: #d7bd77; background: #5b4829e8; }
+ .touch-dash { border-color: #a1e4c2; color: #b1f3d6; }
++.ability-status { display: block; margin-top: 3px; color: #aedbcf; font: 600 8px/1.25 system-ui, sans-serif; letter-spacing: 0; white-space: nowrap; }
++.ability-slot { height: 78px; min-width: 66px; }
++[data-readiness="waiting"] .ability-status { color: #efc6a3; }
++.ability-slot[data-readiness="waiting"] .ability-icon { opacity: .5; }
++[data-readiness="active"] { border-color: #dfbcff; box-shadow: inset 0 0 16px #b793e92b; }
++[data-readiness="active"] .ability-status { color: #efd8ff; }
++.touch-action .ability-status { font-size: 8px; margin-top: 4px; }
++.touch-action[data-readiness="waiting"] { border-color: #786e65; }
+ .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+ @media (pointer: coarse) {
+   .runtime-help { display: none; } .runtime-touch-hint { display: block; }
+diff --git a/src/runtime.js b/src/runtime.js
+index 1687f96..2ba942b 100644
+--- a/src/runtime.js
++++ b/src/runtime.js
+@@ -19,7 +19,7 @@
+     }
+     const gameRuntime = {
+       started: false, ready: false, manualPaused: false, settings: readRuntimeSettings(),
+-      aimAssist: false, lastAim: { x: 0, y: -1 }, modalNodes: [],
++      aimAssist: true, pointerAim: null, viewShake: { x: 0, y: 0 }, lastAim: { x: 0, y: -1 }, modalNodes: [],
+       frameMetrics: { frames: 0, lastFrameMs: 0, averageWorkMs: 0, worstWorkMs: 0, simulationSteps: 0, droppedTimeMs: 0 }
+     };
+     function saveRuntimeSettings() {
+@@ -108,7 +108,14 @@
+       document.querySelectorAll('.touch-action.is-held').forEach(button => button.classList.remove('is-held'));
+     }
+     function updateAimAssist() {
+-      if (!gameRuntime.aimAssist) return;
++      if (!gameRuntime.aimAssist) {
++        refreshPointerAim();
++        return;
++      }
++      const moveX = Number(Boolean(keys.d || keys.arrowright)) - Number(Boolean(keys.a || keys.arrowleft));
++      const moveY = Number(Boolean(keys.s || keys.arrowdown)) - Number(Boolean(keys.w || keys.arrowup));
++      const movement = Math.hypot(moveX, moveY);
++      if (movement) gameRuntime.lastAim = { x: moveX / movement, y: moveY / movement };
+       let nearest = null, distance = Infinity;
+       for (const enemy of gameState.enemies) {
+         if (enemy.hp <= 0) continue;
+@@ -130,10 +137,24 @@
+       if (mouse.leftDown || keys.j || [...touchPointers.values()].includes('strike')) performRuntimeAction('strike');
+       if (mouse.rightDown || keys.k || [...touchPointers.values()].includes('special')) performRuntimeAction('special');
+     }
+-    function setPointerAim(event) {
++    function refreshPointerAim() {
++      const pointer = gameRuntime.pointerAim;
++      if (!pointer) return;
++      // Store viewport coordinates, not a stale canvas offset. A stationary
++      // cursor must still aim correctly after scrolling, layout or a resize.
+       const rect = canvas.getBoundingClientRect();
+-      mouse.x = (event.clientX - rect.left) * canvas.width / Math.max(1, rect.width);
+-      mouse.y = (event.clientY - rect.top) * canvas.height / Math.max(1, rect.height); gameRuntime.aimAssist = false;
++      // Undo the shake in the last displayed frame so casting selects the
++      // piece of floor actually beneath the cursor at the moment of the press.
++      mouse.x = (pointer.x - rect.left) * canvas.width / Math.max(1, rect.width) - gameRuntime.viewShake.x;
++      mouse.y = (pointer.y - rect.top) * canvas.height / Math.max(1, rect.height) - gameRuntime.viewShake.y;
++      const worldX = mouse.x + gameState.camera.x - canvas.width / 2;
++      const worldY = mouse.y + gameState.camera.y - canvas.height / 2;
++      player.angle = Math.atan2(worldY - player.y, worldX - player.x);
++    }
++    function setPointerAim(event) {
++      gameRuntime.pointerAim = { x: event.clientX, y: event.clientY };
++      gameRuntime.aimAssist = false;
++      refreshPointerAim();
+     }
+     function pauseRuntime(reason = 'paused') {
+       if (!gameRuntime.started) return;
+@@ -167,7 +188,9 @@
+       if ([' ', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) event.preventDefault();
+       keys[key] = true; if (event.repeat) return;
+       const action = { q: 'cast', e: 'cast', ' ': 'dash', shift: 'dash', f: 'hex', j: 'strike', k: 'special' }[key];
+-      if (action) { gameRuntime.aimAssist = true; performRuntimeAction(action); }
++      // Ability keys do not change aim mode: mouse players also cast with Q/E.
++      // Keyboard-only play starts assisted; touch controls explicitly select it.
++      if (action) performRuntimeAction(action);
+     });
+     window.addEventListener('keyup', event => { delete keys[event.key.toLowerCase()]; });
+     canvas.addEventListener('pointermove', event => { if (event.pointerType !== 'touch') setPointerAim(event); });
+@@ -197,9 +220,9 @@
+         <div id="runtime-toolbar"><button id="runtime-pause" type="button" aria-label="Pause game and open settings">Ⅱ <span>Pause</span></button></div>
+         <section id="runtime-overlay" role="dialog" aria-modal="true" aria-labelledby="runtime-title">
+           <div class="runtime-panel">
+-            <div class="runtime-eyebrow">CHRONOS FALL · UNDERWORLD ODYSSEY · v2.1.2</div><h1 id="runtime-title">Defy the Titan of Time</h1>
++            <div class="runtime-eyebrow">CHRONOS FALL · UNDERWORLD ODYSSEY · v2.2.1 · BETA</div><h1 id="runtime-title">Defy the Titan of Time</h1>
+             <p id="runtime-description">Descend through shifting chambers, forge a divine build and challenge the endless depths beyond Chronos.</p>
+-            <div class="runtime-help"><span><b>MOVE</b> WASD / Arrows</span><span><b>STRIKE</b> Hold click / J</span><span><b>SPECIAL</b> Right click / K</span><span><b>DASH</b> Space / Shift</span><span><b>CAST</b> Q / E</span><span><b>HEX</b> F when charged</span></div>
++            <div class="runtime-help"><span><b>MOVE</b> WASD / Arrows</span><span><b>STRIKE</b> Hold click / J</span><span><b>SPECIAL</b> Right click / K</span><span><b>DASH</b> Space / Shift</span><span><b>CAST</b> Aim cursor · Q / E<br>Press again to burst</span><span><b>HEX</b> F when charged</span></div>
+             <p class="runtime-touch-hint">Touch: move with the left pad and use the ability buttons. Attacks aim at the nearest foe.</p>
+             <div class="runtime-settings"><label><input id="runtime-mute" type="checkbox"> Mute sound</label><label><input id="runtime-motion" type="checkbox"> Reduce motion</label></div>
+             <button id="runtime-start" class="runtime-primary" type="button" disabled>Preparing the underworld…</button>
+diff --git a/tools/ability-hud-browser-check.mjs b/tools/ability-hud-browser-check.mjs
+new file mode 100644
+index 0000000..00456e1
+--- /dev/null
++++ b/tools/ability-hud-browser-check.mjs
+@@ -0,0 +1,32 @@
++import assert from 'node:assert/strict';
++import {withBrowser, preparePage} from './browser-harness.mjs';
++
++await withBrowser(async ({browser, url, root}) => {
++  for (const options of [{viewport: {width: 1100, height: 800}}, {viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true}]) {
++    const {page, errors} = await preparePage(browser, options);
++    await page.goto(url);
++    await page.waitForFunction(() => gameRuntime.ready);
++    await page.locator('#runtime-start').click();
++    await page.evaluate(() => { gameState.enemies = []; player.iFrames = 1e6; });
++    const cast = page.locator(options.hasTouch ? '.touch-action[data-action="cast"]' : '[data-ability="cast"]');
++    await page.waitForFunction(() => document.querySelector('[data-ability="cast"]').dataset.readiness === 'ready');
++    assert.match(await cast.textContent(), /15 Magick/);
++    if (options.hasTouch) await cast.tap();
++    else { await page.mouse.move(710, 500); await page.keyboard.press('q'); }
++    await page.waitForFunction(() => document.querySelector('[data-ability="cast"]').dataset.readiness === 'active');
++    assert.match(await cast.textContent(), /Burst/);
++    if (options.hasTouch) await cast.tap();
++    else await page.keyboard.press('q');
++    await page.waitForFunction(() => !player.castActive);
++    await page.evaluate(() => { player.magick = 0; player.dashCooldown = .3; gameState.isPaused = true; });
++    await page.waitForFunction(() => document.querySelector('[data-ability="cast"]').dataset.readiness === 'waiting');
++    assert.match(await cast.textContent(), /Low Magick/);
++    assert.match(await page.locator('[data-ability="dash"] .ability-status').textContent(), /0.3s/);
++    await page.evaluate(() => { player.magick = 40; player.dashCooldown = 0; player.hexCharge = player.hexMax; });
++    await page.waitForFunction(() => document.querySelector('[data-ability="cast"]').dataset.readiness === 'ready');
++    assert.equal(await page.locator('[data-ability="hex"] .ability-status').textContent(), 'Ready');
++    assert.deepEqual(errors, []);
++    await page.close();
++  }
++  console.log('PASS desktop and touch ability state, cast/detonation, low Magick, cooldown and Hex readiness');
++});
+diff --git a/tools/cast-ground.test.mjs b/tools/cast-ground.test.mjs
+index d4c0dfa..a16fe0e 100644
+--- a/tools/cast-ground.test.mjs
++++ b/tools/cast-ground.test.mjs
+@@ -14,7 +14,7 @@ function drawFixture() {
+   const context = vm.createContext({
+     performance: {now: () => 0},
+     gameState: {chamber: 1, enemies: [], projectiles: [], particles: [], doors: [], camera: {x: 0, y: 0}},
+-    gameRuntime: {settings: {reducedMotion: true}, frameMetrics: {frames: 0, simulationSteps: 0, droppedTimeMs: 0, averageWorkMs: 0, worstWorkMs: 0}},
++    gameRuntime: {settings: {reducedMotion: true}, viewShake: {x: 0, y: 0}, frameMetrics: {frames: 0, simulationSteps: 0, droppedTimeMs: 0, averageWorkMs: 0, worstWorkMs: 0}},
+     player: {x: 200, y: 100, radius: 24, angle: 0,
+       castActive: Object.freeze({x: -80, y: 35, radius: 170, timer: 1.5, angle: 0.8})},
+     ctx, canvas: {width: 1440, height: 900}, arena: {width: 1400, height: 900},
+diff --git a/tools/cursor-cast-browser-check.mjs b/tools/cursor-cast-browser-check.mjs
+new file mode 100644
+index 0000000..e926e9f
+--- /dev/null
++++ b/tools/cursor-cast-browser-check.mjs
+@@ -0,0 +1,184 @@
++import assert from 'node:assert/strict';
++import {withBrowser, preparePage} from './browser-harness.mjs';
++
++function closeTo(actual, expected, label) {
++  assert.ok(Math.abs(actual - expected) < 0.001, `${label}: expected ${expected}, got ${actual}`);
++}
++
++// Observe real ability calls, without bypassing pointer/keyboard input handlers.
++async function startFixture(browser, url, options = {}) {
++  const fixture = await preparePage(browser, {viewport: {width: 1100, height: 800}, ...options});
++  const {page} = fixture;
++  await page.goto(url);
++  await page.waitForFunction(() => gameRuntime.ready);
++  if (options.hasTouch) await page.locator('#runtime-start').tap();
++  else await page.locator('#runtime-start').click();
++  await page.evaluate(() => {
++    player.iFrames = 1e6;
++    player.magick = player.maxMagick;
++    gameState.equippedBoons = [];
++    gameState.pendingActions = [];
++    gameState.doors = [];
++    const enemy = new Enemy(-180, -220, 'shade_wretch');
++    enemy.update = () => {};
++    enemy.hp = 1e6;
++    gameState.enemies = [enemy];
++    gameRuntime.settings.reducedMotion = true;
++    screenShake = 0;
++    window.cursorCastCalls = [];
++    const cast = player.triggerCast;
++    player.triggerCast = function(...args) {
++      const rect = canvas.getBoundingClientRect();
++      const evidence = {
++        camera: {...gameState.camera}, shake: {...gameRuntime.viewShake},
++        rect: {left: rect.left, top: rect.top, width: rect.width, height: rect.height},
++        width: canvas.width, height: canvas.height,
++        before: this.castActive ? {...this.castActive} : null,
++        magickBefore: this.magick,
++      };
++      const result = cast.apply(this, args);
++      evidence.after = this.castActive ? {...this.castActive} : null;
++      evidence.magickAfter = this.magick;
++      window.cursorCastCalls.push(evidence);
++      return result;
++    };
++  });
++  return fixture;
++}
++
++async function lastCast(page) {
++  return page.evaluate(() => window.cursorCastCalls.at(-1));
++}
++
++function assertPointerCast(call, pointer, label) {
++  assert.equal(call.before, null, `${label}: this press summons a new circle`);
++  assert.ok(call.after, `${label}: circle exists`);
++  const x = (pointer.x - call.rect.left) * call.width / call.rect.width + call.camera.x - call.width / 2 - call.shake.x;
++  const y = (pointer.y - call.rect.top) * call.height / call.rect.height + call.camera.y - call.height / 2 - call.shake.y;
++  closeTo(call.after.x, x, `${label}: world x`);
++  closeTo(call.after.y, y, `${label}: world y`);
++  closeTo(call.magickBefore - call.magickAfter, 15, `${label}: one cast cost`);
++}
++
++await withBrowser(async ({browser, url}) => {
++  const {page, errors} = await startFixture(browser, url);
++  const firstPointer = {x: 760, y: 510};
++  await page.mouse.move(firstPointer.x, firstPointer.y);
++  await page.keyboard.down('q');
++  const first = await lastCast(page);
++  assertPointerCast(first, firstPointer, 'Q with a nearer enemy elsewhere');
++  assert.equal(await page.evaluate(() => gameRuntime.aimAssist), false);
++  await page.keyboard.down('q');
++  assert.equal(await page.evaluate(() => window.cursorCastCalls.length), 1, 'repeated keydown does not detonate or charge again');
++  await page.keyboard.up('q');
++  console.log('PASS real mouse + Q casts at the cursor, preserves mouse aim and ignores key repeat');
++
++  await page.keyboard.down('d');
++  await page.waitForTimeout(180);
++  await page.keyboard.up('d');
++  const anchored = await page.evaluate(() => ({cast: {...player.castActive}, playerX: player.x, cameraX: gameState.camera.x}));
++  closeTo(anchored.cast.x, first.after.x, 'moving player leaves world x fixed');
++  closeTo(anchored.cast.y, first.after.y, 'moving player leaves world y fixed');
++  assert.ok(anchored.playerX > 20 && anchored.cameraX > first.camera.x, 'real movement also moves the camera');
++  await page.keyboard.press('e');
++  const detonated = await lastCast(page);
++  assert.equal(detonated.after, null, 'E detonates the existing cast');
++  closeTo(detonated.before.x, first.after.x, 'detonation keeps the original world x');
++  closeTo(detonated.before.y, first.after.y, 'detonation keeps the original world y');
++  closeTo(detonated.magickBefore, detonated.magickAfter, 'detonation is free');
++
++  await page.keyboard.press('e');
++  const cameraCast = await lastCast(page);
++  assertPointerCast(cameraCast, firstPointer, 'E after camera movement without moving cursor');
++  assert.notEqual(cameraCast.after.x, first.after.x, 'new casts use the camera at the new press');
++  console.log('PASS movement leaves an existing cast anchored; E detonates there and re-casts under the stationary cursor');
++
++  await page.keyboard.press('q');
++  const secondPointer = {x: 410, y: 490};
++  await page.mouse.move(secondPointer.x, secondPointer.y);
++  for (const action of ['j', 'k', 'f', 'Space']) await page.keyboard.press(action);
++  await page.keyboard.press('e');
++  assertPointerCast(await lastCast(page), secondPointer, 'E after pointer change and other abilities');
++  assert.equal(await page.evaluate(() => gameRuntime.aimAssist), false, 'other keyboard abilities do not steal pointer intent');
++  console.log('PASS moving the pointer changes the next cast and strike, special, Hex and dash preserve that aim');
++
++  await page.evaluate(() => {
++    player.castActive = null;
++    player.magick = player.maxMagick;
++    gameRuntime.settings.reducedMotion = false;
++    screenShake = 40;
++  });
++  await page.waitForFunction(() => Math.hypot(gameRuntime.viewShake.x, gameRuntime.viewShake.y) > 1);
++  await page.keyboard.press('q');
++  const shaken = await lastCast(page);
++  assert.ok(Math.hypot(shaken.shake.x, shaken.shake.y) > 0, 'press occurs during a rendered shake');
++  assertPointerCast(shaken, secondPointer, 'visible floor position during screen shake');
++  await page.evaluate(() => { gameRuntime.settings.reducedMotion = true; screenShake = 0; });
++  await page.waitForFunction(() => gameRuntime.viewShake.x === 0 && gameRuntime.viewShake.y === 0);
++  console.log('PASS screen shake is inverted when mapping the visible floor under the cursor');
++
++  await page.evaluate(() => {
++    player.castActive = null;
++    player.magick = player.maxMagick;
++    player.isDashing = false;
++    canvas.style.cssText = 'position:fixed;left:70px;top:130px;width:800px;height:500px;';
++  });
++  const scaledPointer = {x: 670, y: 480};
++  await page.mouse.move(scaledPointer.x, scaledPointer.y);
++  await page.keyboard.press('q');
++  const scaled = await lastCast(page);
++  assertPointerCast(scaled, scaledPointer, 'offset, CSS-scaled canvas');
++  assert.notEqual(scaled.rect.width, scaled.width, 'test exercises a different canvas backing scale');
++
++  await page.evaluate(() => {
++    player.castActive = null;
++    player.magick = player.maxMagick;
++    canvas.style.left = '105px';
++    canvas.style.top = '160px';
++    canvas.style.width = '720px';
++  });
++  await page.keyboard.press('e');
++  assertPointerCast(await lastCast(page), scaledPointer, 'layout shift with a stationary pointer');
++  await page.evaluate(() => { player.castActive = null; player.magick = player.maxMagick; });
++  await page.setViewportSize({width: 1200, height: 850});
++  // Viewport emulation resolves before Chromium necessarily dispatches resize.
++  await page.waitForFunction(() => canvas.width === 720 && canvas.height === 500);
++  await page.keyboard.press('q');
++  const resized = await lastCast(page);
++  assertPointerCast(resized, scaledPointer, 'viewport resize with a stationary pointer');
++  assert.equal(resized.width, 720, 'real resize refreshes backing dimensions');
++  assert.deepEqual(errors, []);
++  await page.close();
++  console.log('PASS casts remain accurate with offset/scaled canvas, layout changes and resize without a new mouse event');
++
++  const keyboard = await startFixture(browser, url);
++  await keyboard.page.keyboard.press('q');
++  const assisted = await lastCast(keyboard.page);
++  assert.equal(assisted.after.x, -180);
++  assert.equal(assisted.after.y, -220);
++  assert.equal(await keyboard.page.evaluate(() => gameRuntime.aimAssist), true);
++  await keyboard.page.evaluate(() => { player.castActive = null; player.magick = player.maxMagick; gameState.enemies = []; });
++  await keyboard.page.keyboard.down('ArrowRight');
++  await keyboard.page.waitForTimeout(60);
++  await keyboard.page.keyboard.up('ArrowRight');
++  await keyboard.page.keyboard.press('e');
++  const fallback = await keyboard.page.evaluate(() => ({cast: window.cursorCastCalls.at(-1).after, playerX: player.x, playerY: player.y}));
++  closeTo(fallback.cast.x, fallback.playerX + 220, 'keyboard fallback aims in the last movement direction');
++  closeTo(fallback.cast.y, fallback.playerY, 'keyboard fallback height');
++  assert.deepEqual(keyboard.errors, []);
++  await keyboard.page.close();
++  console.log('PASS keyboard-only casting targets nearby foes and falls back to the last movement direction');
++
++  const mobile = await startFixture(browser, url, {viewport: {width: 390, height: 844}, isMobile: true, hasTouch: true});
++  await mobile.page.locator('[data-action="cast"]').tap();
++  const touch = await lastCast(mobile.page);
++  assert.equal(touch.after.x, -180);
++  assert.equal(touch.after.y, -220);
++  assert.equal(await mobile.page.evaluate(() => gameRuntime.aimAssist), true);
++  await mobile.page.locator('[data-action="cast"]').tap();
++  assert.equal((await lastCast(mobile.page)).after, null);
++  assert.equal(await mobile.page.evaluate(() => window.cursorCastCalls.length), 2, 'each touch tap performs exactly one action');
++  assert.deepEqual(mobile.errors, []);
++  await mobile.page.close();
++  console.log('PASS real touch Cast retains assisted aim and a second tap detonates exactly once');
++});
+diff --git a/tools/premium-browser-check.mjs b/tools/premium-browser-check.mjs
+new file mode 100644
+index 0000000..c9490a5
+--- /dev/null
++++ b/tools/premium-browser-check.mjs
+@@ -0,0 +1,24 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import path from 'node:path';
++import {withBrowser,preparePage} from './browser-harness.mjs';
++await withBrowser(async({browser,url,root})=>{
++ const {page,errors}=await preparePage(browser);
++ await page.goto(url);await page.waitForFunction(()=>gameRuntime.ready);
++ const output=path.join(root,'test-results');await fs.mkdir(output,{recursive:true});
++ await page.screenshot({path:path.join(output,'premium-welcome.png')});
++ await page.locator('#runtime-start').click();
++ await page.evaluate(()=>{gameState.isPaused=true;gameState.enemies=[];gameState.doors=[{x:-200,y:-40,radius:45,reward:{type:'god',godKey:'poseidon',label:'POSEIDON'}},{x:200,y:-40,radius:45,reward:{type:'heart',label:'CENTAUR HEART'}}];player.x=0;player.y=70;player.isDashing=true;player.dashVx=820;});
++ await page.screenshot({path:path.join(output,'premium-gates.png')});
++ const result=await page.evaluate(()=>{
++  const before=gameState.particles.length;
++  for(let i=0;i<500;i++)drawPremiumAtmosphere(ctx,i*16);
++  const after=gameState.particles.length;
++  const draw=time=>{ctx.clearRect(0,0,canvas.width,canvas.height);ctx.save();ctx.translate(canvas.width/2,canvas.height/2);drawPremiumAtmosphere(ctx,time);ctx.restore();return canvas.toDataURL();};
++  gameRuntime.settings.reducedMotion=true;const a=draw(100),b=draw(5000);
++  gameRuntime.settings.reducedMotion=false;const c=draw(100),d=draw(5000);
++  return {before,after,frozen:a===b,animated:c!==d};
++ });
++ assert.equal(result.before,result.after);assert.equal(result.frozen,true);assert.equal(result.animated,true);
++ assert.deepEqual(errors,[]);console.log('Premium atmosphere is animated, bounded and static with reduced motion.');
++});
+diff --git a/tools/remote-grading.test.mjs b/tools/remote-grading.test.mjs
+new file mode 100644
+index 0000000..ddfb892
+--- /dev/null
++++ b/tools/remote-grading.test.mjs
+@@ -0,0 +1,40 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {createHadesLearningController,validHadesQuestions} from '../learning-parent.js';
++const rows=Array.from({length:5},(_,i)=>({id:'remote-'+i,html:'<p>Bank question</p>',options:['A','B'],grading:'remote',answer:null}));
++function fixture(gradeQuestion,presentQuestions){
++ const messages=[];const source={postMessage:d=>messages.push(d)};let identity='student:P6';
++ const controller=createHadesLearningController({origin:'https://portal.test',subject:'Math',getFrame:()=>({contentWindow:source}),getIdentity:()=>identity,isAllowed:()=>true,isActive:()=>true,makeSessionId:()=> 'session',getQuestions:()=>rows,gradeQuestion,presentQuestions});
++ const send=data=>controller.handleMessage({origin:'https://portal.test',source,data});
++ return {controller,messages,send,change:()=>identity='other:P4'};
++}
++test('private-key-free rows require an explicit parent marker',()=>{
++ assert.equal(validHadesQuestions(rows).length,0);assert.equal(validHadesQuestions(rows,true).length,5);
++});
++test('remote marks complete once, remain outside iframe, and replay no server calls',async()=>{
++ let calls=0;
++ const f=fixture(async()=>{calls++;return {correct:true,answer:0};},async({grade})=>{for(let i=0;i<5;i++)assert.equal((await grade(i,0,1000)).correct,true);return true;});
++ await f.send({type:'HADES_HELLO',requestId:'hello'});
++ await f.send({type:'HADES_ROUND_REQUEST',requestId:'round',sessionId:'session',round:1});
++ assert.equal(calls,5);assert.equal(f.messages.at(-1).healPercent,40);
++ await f.send({type:'HADES_ROUND_REQUEST',requestId:'retry',sessionId:'session',round:1});
++ assert.equal(calls,5);assert.equal(JSON.stringify(f.messages).includes('answer'),false);
++});
++test('in-flight double clicks and profile changes cannot grant rewards',async()=>{
++ let finish,calls=0;
++ const f=fixture(()=>{calls++;return new Promise(r=>finish=r);},async({grade})=>{
++  const pending=grade(0,0,100);assert.equal(await grade(0,0,100),null);
++  f.change();finish({correct:true,answer:0});assert.equal(await pending,null);return true;
++ });
++ await f.send({type:'HADES_HELLO',requestId:'hello'});
++ await f.send({type:'HADES_ROUND_REQUEST',requestId:'round',sessionId:'session',round:1});
++ assert.equal(calls,1);assert.ok(f.messages.every(m=>m.type!=='HADES_ROUND_RESULT'));
++});
++test('invalid or unavailable marks block advancement',async()=>{
++ for(const marker of [async()=>({correct:true,answer:1}),async()=>{throw Error('offline');}]){
++  const f=fixture(marker,async({grade})=>{await grade(0,0,100);return true;});
++  await f.send({type:'HADES_HELLO',requestId:'hello'});
++  await f.send({type:'HADES_ROUND_REQUEST',requestId:'round',sessionId:'session',round:1});
++  assert.equal(f.messages.at(-1).type,'HADES_ROUND_BLOCKED');
++ }
++});
+diff --git a/tools/runtime.test.mjs b/tools/runtime.test.mjs
+index f218a5b..b46678a 100644
+--- a/tools/runtime.test.mjs
++++ b/tools/runtime.test.mjs
+@@ -10,7 +10,7 @@ function makeRuntime() {
+     canPlay: true,
+     performance: {now: () => 0},
+     gameState: {chamber: 1, enemies: [], projectiles: [], particles: [], doors: [], camera: {x: 0, y: 0}},
+-    gameRuntime: {settings: {reducedMotion: true}, frameMetrics: {frames: 0, simulationSteps: 0, droppedTimeMs: 0, averageWorkMs: 0, worstWorkMs: 0}},
++    gameRuntime: {settings: {reducedMotion: true}, viewShake: {x: 0, y: 0}, frameMetrics: {frames: 0, simulationSteps: 0, droppedTimeMs: 0, averageWorkMs: 0, worstWorkMs: 0}},
+     player: {x: 0, y: 0, radius: 24, update() {}, draw() {}},
+     ctx: {clearRect() {}, save() {}, translate() {}, restore() {}},
+     canvas: {width: 1440, height: 900},
+diff --git a/tools/test-gameplay.cjs b/tools/test-gameplay.cjs
+index 5901f72..68a2c80 100644
+--- a/tools/test-gameplay.cjs
++++ b/tools/test-gameplay.cjs
+@@ -217,3 +217,66 @@ console.log('Gameplay regressions passed: progression, rewards, saving, pause, A
+   assert.equal(f.run('gameState.roomsCleared'), 1, 'chain reactions award the room clear once');
+ }
+ console.log('Independent boon review passed: real upgrade effects, Hex replacement, combo animation, lethal retaliation, bounded fields, synergies, and every boon combat smoke.');
++
++// Repeated attacks and persistent fields must strengthen status effects without
++// postponing their damage or changing their strength with the frame rate.
++{
++  for (const impending of [false, true]) {
++    const f = fixture();
++    f.run(`gameState.equippedBoons=${impending ? "[{id:'ares_impending'}]" : '[]'};
++      gameState.enemies=[new Enemy(0,0,'tartarus_behemoth')];
++      const target=gameState.enemies[0]; target.maxHp=target.hp=10000; target.spawnGrace=0; target.attackCooldown=99;
++      target.applyDoom(120); target.update(0.5); target.applyDoom(90);`);
++    assert(Math.abs(f.run('target.doomTimer') - (impending ? 1 : 0.6)) < 1e-9,
++      'repeat hits preserve the countdown of pending Doom');
++    assert.equal(f.run('target.doomDamage'), impending ? 216 : 120, 'weaker hits cannot erase stronger Doom');
++    f.run(`target.applyDoom(160); for(let i=0;i<${impending ? 7 : 5};i++){target.applyDoom(90);target.update(0.15);}`);
++    assert.equal(f.run('target.maxHp-target.hp'), impending ? 288 : 160, 'Doom detonates while attacks continue');
++    f.run('target.applyDoom(90);');
++    assert.equal(f.run('target.doomDamage'), impending ? 162 : 90, 'a new Doom starts after the previous detonation');
++  }
++}
++{
++  const f = fixture();
++  f.run("const chilled=new Enemy(0,0,'shade_wretch'); chilled.applyChill(3.5); chilled.applyChill(0.6);");
++  assert.equal(f.run('chilled.chillTimer'), 3.5, 'a short cast pulse does not shorten a longer attack Chill');
++  f.run('for(let i=0;i<20;i++) chilled.applyChill(0.6);');
++  assert.equal(f.run('chilled.chillStacks'), 5, 'Chill stacks stop at the Killing Frost threshold');
++
++  const stacks = [];
++  for (const fps of [30, 60, 144]) {
++    const pulse = fixture();
++    pulse.run("gameState.equippedBoons=[{id:'demeter_ring'},{id:'duo_blizzard'}]; gameState.enemies=[new Enemy(0,0,'tartarus_behemoth')]; player.castActive={x:0,y:0,radius:100,baseRadius:100,timer:2.5,angle:0};");
++    pulse.run(`for(let i=0;i<${fps};i++) updateBoonEffects(1/${fps});`);
++    stacks.push(pulse.run('gameState.enemies[0].chillStacks'));
++  }
++  assert.deepEqual(stacks, [3, 3, 3], 'overlapping cast Chill effects pulse once per interval at every frame rate');
++
++  f.run("gameState.equippedBoons=[{id:'duo_blizzard'}]; gameState.enemies=[new Enemy(280,220,'shade_wretch')]; const pulled=gameState.enemies[0]; player.castActive={x:450,y:220,radius:100,baseRadius:100,timer:2.5,angle:0}; for(let i=0;i<120;i++) updateBoonEffects(1/60);");
++  assert(f.run('pulled.x>280'), 'Blizzard pulls nearby foes toward the fixed cast position');
++  assert(f.run('!checkWallCollision(pulled.x,pulled.y,pulled.radius)'), 'Blizzard pull respects arena pillars');
++  assert(f.run('pulled.x<380'), 'Blizzard cannot pull a foe through a pillar');
++}
++{
++  for (const [status, multiplier] of [['none', 1], ['chill', 0.5], ['time', 0.15]]) {
++    const f = fixture();
++    f.run(`gameState.enemies=[new Enemy(0,0,'shade_wretch')]; const slowed=gameState.enemies[0];
++      player.x=500;player.y=0;slowed.spawnGrace=0;slowed.attackCooldown=99;
++      ${status === 'chill' ? 'slowed.applyChill(3);' : status === 'time' ? 'slowed.timeSlowTimer=3;' : ''}
++      slowed.update(0.1);`);
++    assert(Math.abs(f.run('slowed.x') - f.run('slowed.speed') * 0.1 * multiplier) < 1e-9,
++      `${status} applies its movement slowdown once`);
++  }
++}
++{
++  for (const fps of [30, 60, 144]) {
++    const f = fixture();
++    f.run('gameState.enemies=[];player.x=0;player.y=0;player.angle=0;player.triggerDash();');
++    f.run(`while(player.isDashing) player.update(1/${fps});`);
++    assert(Math.abs(f.run('player.x')-147.6)<1e-9, 'dash travel ends at its duration without a final-frame overshoot');
++  }
++  const f = fixture();
++  f.run("gameState.equippedBoons=[{id:'poseidon_dash'}];gameState.enemies=[new Enemy(50,0,'tartarus_behemoth')];const dashVictim=gameState.enemies[0];player.x=0;player.y=0;player.angle=Math.PI;keys.d=true;player.triggerDash();updateBoonEffects(1/60);");
++  assert(f.run('dashVictim.x>50'), 'dash knockback follows movement even when the player aims backwards');
++}
++console.log('Combat timing regressions passed: reliable Doom, bounded cast Chill, collision-safe pulls, consistent slows, and precise dashes.');

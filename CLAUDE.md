@@ -1,0 +1,8011 @@
+# CLAUDE.md
+
+Guidance for Claude when working in this repo.
+
+## Public home page identity
+- Keep the official Polymath Learning Centre logo at the top left of the public home page. Use `assets/branding/polymath-learning-centre.png`, preserving the full artwork and aspect ratio; do not replace it with a monogram or invented wordmark. See `assets/branding/README.md` for provenance.
+- Keep the header logo compact and aligned with the two-line “Polymath Learning Centre” name. Label the public sign-in action “Polymath Online”.
+- Keep About Us and Enquire navigation visible on desktop and phones. Centre-services content is in `#lp-about`; class enquiries go to `enquiry.html`. Science is offered for P3–Secondary 1, and Mathematics for P4–P6.
+- `enquiry.html`, `enquiry.css`, `enquiry.js` and `enquiry-core.mjs` provide the public enquiry form. Its server endpoint fixes the two centre recipients, validates fields, and protects stored contacts. Never replace server-confirmed acceptance with a pretend-success message or a mailto-only submission.
+- Base programme, contact and trial details on the centre's current official pages. The public sample, portal account creation and centre class enquiries are different actions; keep their labels clear. Do not invent results, awards, testimonials or free-trial offers.
+
+## Apps
+- `index.html` + `app.js` — **"Science Learning Portal"** (the product name shown in the sidebar, the `<title>` and the footer; it was "Keywords Learning Portal" until v1.181.0). "Science Quest" is NOT the portal — it is the RPG/dungeon game layer inside it, and the name used in the login / password-reset / prize emails. Keep the two distinct. The CER science-quiz app: admin question authoring (block editor, AI build-from-screenshot, image crop/touch-up, vetting → bank) + student practice + an RPG/dungeon game layer. **The markup and CSS live in `index.html`; ALL of the application JavaScript lives in `app.js`**, loaded as `<script type="module" src="app.js">`. They ship together — `index.html` is useless without `app.js` next to it, so deploy the directory, never the single file.
+  - Functions referenced from inline `onclick`/`on*` handlers MUST be assigned to `window` near the bottom of `app.js` (search `window.navigateTo =`), because the module has its own scope.
+  - `const` declared mid-module is in its temporal dead zone earlier in the file — only read such values at call time, not at module-eval time.
+  - **Keep the page fast — these are load-bearing, do not undo them:**
+    - Fonts are ONE non-blocking request (`media="print" onload="this.media='all'"`). Adding another render-blocking `<link rel="stylesheet">` to Google Fonts puts first paint back at the mercy of the school's network. Crimson Pro is deliberately `media="print"` — it is only used by the printed worksheet cover.
+    - There is NO icon font. The seven landing-page icons are inline SVG inside `.material-symbols-outlined` spans. Do not reintroduce Material Symbols: the variable webfont is 1.1 MB.
+    - Tailwind is PREBUILT and inlined (search `Tailwind, prebuilt`). Do not put the `cdn.tailwindcss.com` Play CDN back — it ships a CSS compiler to the student's phone. Regenerate via `docs/tailwind/` instead.
+    - `<link rel="modulepreload" href="app.js">` in the head is what starts the app download early. Keep it, and keep it pointing at the right filename.
+  - **Printed / PDF worksheet answer boxes** are sized from the MODEL ANSWER by `printAnswerLines(block, text)`: `PRINT_ANSWER_LINES` (2) is the floor for an ordinary answer, a one-number / ≤4-word answer (`PRINT_SHORT_CHARS`) gets 1 line, and longer answers scale at `PRINT_LINE_CHARS` (52) characters a ruled line with a `PRINT_HAND_ALLOWANCE` (×1.15) for handwriting, capped at `PRINT_LINES_MAX`. Each Claim / Evidence / Reasoning box is sized from ITS OWN field, so a one-line claim can sit beside a five-line reasoning. The answer block's "Printed lines" field (`block.printLines`, edited via `printLinesFieldHtml` / `setPrintLines`) overrides the estimate; blank means Auto. The box `min-height` in the print CSS is one line + padding (32pt) — do not raise it, or a one-line answer gets propped open again. Both print paths — `doPrintWorksheetOpen` and the saved-worksheet builder — must stay in step.
+  - **Touch up & label — the transform session** (`_annotXform*`) is ONE session shared by Resize (F), Rotate (R) and Skew (K): the selected pixels are lifted onto their own layer (the hole behind them painted white), and nothing is committed until Apply, so 30° and back to 0° leaves the pixels as sharp as they started. The transform is **scale → skew → rotate**, and `_annotXformMapper` and `_annotXformDrawInto` must apply it in that same order or the handles drift off the picture they are drawn on. Resize (v1.247.0) drags the eight handles round the box: the corner OPPOSITE the one being dragged is the anchor, so the maths runs in the **M-frame** (`_annotXformMFrame` — rotation and slant undone, scaling still applied), where the new factor is just `(pointer − anchor) / handle-span`, and the layer offset is then whatever puts the anchor back. That is what keeps it exact on an object that is already turned. Two rules hold it together: only the axes a handle actually DRIVES get a vote when "keep shape" is on (an edge handle's other axis sits at 1× and would out-vote the drag), and `_annotXformRecentre` puts the pivot back in the middle of the box after every resize or move — without it, a turn afterwards swings the object round a point off to one side. A pointer arrives in CANVAS coordinates and the transform lives in the pre-offset frame, so anything comparing the two goes through `_annotXformUnoffset` or a grown canvas breaks the hit test.
+  - **Annotation answers** — an annotation pad (an image with `annotate !== false`, or a `workingSpace` with `annotate`) carries its own answer on the block: `answerImg` is a screenshot of the diagram WITH the correct annotations on it, `answerKey` is the same in words. The answer to "draw and label this" is a picture, so the screenshot is the primary form and `annotAnsWriteKey` generates the words from it. All three consumers read the BLOCK, not the question: `annotShowAnswer(sel, pid)` shows that pad's own answer under that pad, `annotAiCheck` sends the screenshot as a SECOND picture so the AI compares two diagrams instead of a diagram against a sentence, and `_pushAnnotAnswerKey` puts it on the printed key — called once per block in both print loops, because pads live across the `image`, `workingSpace` and `default` branches.
+  - **On-screen picture width** is capped by `IMG_AUTO_MAX_PCT` (70%) inside `imgSizeStyle` — the ONE function every rendered picture goes through (block editor, student practice, worksheet preview, both print paths, the game quizzes). It is a `max-width` CAP, never a `width`: setting `width:70%` would stretch a small inset UP to 70% of the column, which is the opposite of making pictures smaller. A picture the author sized by hand (`block.scale`) keeps that size — the +/− control exists to override the default.
+  - **Printed picture heights** — `.print-question-page img` caps at **92mm**, with `print-img-sm` (60mm) / `print-img-lg` (140mm) / `print-img-full` (170mm) chosen per picture by the image block's "Print size" control (`block.printImg`, rendered by `imgPrintClass` / `imgPrintAttr`). A question whose SINGLE picture is paired with ≤3-character MCQ options is upgraded to Large automatically (`imgQuestionNeedsBig`) — that picture holds the options. Do NOT go back to one flat 170mm cap: a question with a diagram and a chart then cannot fit a sheet.
+  - **The print planner must MEASURE, never assume.** `_printPlanIn` lays every page out in a print-CSS iframe; when a page needs fit-to-page shrinking it goes through `_printVerifiedZoom`, which re-measures with the zoom actually applied and steps down until the page really fits, falling back to a flowing (`print-page-tall`) page at the zoom floor. The page box is a fixed height with `overflow: visible`, so any un-verified overestimate paints over the NEXT sheet instead of reflowing. Five things keep the measurement honest — none of them is optional (all five were broken at once in v1.237.0, and the symptom was two questions printed on top of each other):
+    - **Pictures must reserve their box before they load.** An `<img>` that has not decoded occupies ~22px, not the ~350px it prints at, and the planner's iframe RE-FETCHES every picture — so on a slow link its readiness net expires and a page of diagrams is measured as a page of text. `_printLearnImgDims` / `_printStampImgDims` (backed by `_printImgNatural`) stamp `width`/`height` onto every printed `<img>` so Chrome reserves the right box from the aspect ratio alone. If anything is still unsized when the planner starts, `_printPlanPages` refuses to plan and takes `_printFlowFallback`, which is denser but can never overlap. **Never emit a printed `<img>` without dimensions.**
+    - **`usable` must reserve the page number.** `measurePage` assembles content + footer; `.print-page-number` is stamped on AFTER planning, so `usable = PRINT_PAGE_PX − numH − PRINT_FIT_SAFETY`. It used to be `PRINT_PAGE_PX − PRINT_FIT_SAFETY`, and `PRINT_FIT_SAFETY` (16px) is smaller than the number's own line (~22.7px) — every page packed to the bar printed ~7px past the box. `budget` derives from the same ceiling (`contentSpace − PRINT_PAGE_RESERVE`), so the packer and the verifier cannot drift apart; `_classifyPrintChunks` takes `usable` as a parameter for the same reason.
+    - **A page promoted to tall must promote its CHUNKS too.** `.print-page-tall` opens the page box; every `.print-question-chunk` still carries `break-inside: avoid`. A chunk that cannot break on an over-sheet page does not flow, it overflows — so `_printPlanIn` writes `cls.tallFlags[idx]` and adds `.print-chunk-tall` for the whole group, because `cls.tallFlags` is what `doScaleAndPrint` re-reads.
+    - **The measuring iframe must get the real fonts.** Both font `<link>`s in `index.html` are `media="print"`; the iframe is a SCREEN medium, so copying them verbatim measures every stem in fallback metrics while the printer uses DM Sans (wider → more lines → ~100px+ per page of unbudgeted growth). `_printFontLinksHtml` forces `media="all"` on the COPIES. Use it — never copy `link.outerHTML` directly.
+    - **No box may be taller than a sheet.** `PRINT_LINES_MANUAL_MAX` (24) caps the author's "Printed lines" override and `_wsBlockLines` / `WS_BLOCK_LINES_MAX` (30) cap the raw pixel heights `openLines` / `workingSpace` write. An unbreakable box bigger than the paper jumps a whole sheet and still does not fit. The tall pages release their inner boxes in CSS (`.print-chunk-tall`/`.print-page-tall` → `.print-open-answer-box`, `.print-open-cer-box`, `.print-cer-section`, `.print-ak-question`).
+  - **`.print-text-block img` must not set `max-height`.** Every printed picture is wrapped in a `.print-text-block`, and that selector has the SAME specificity (0,1,1) as the `.print-question-page img` 92mm cap while sitting later in the file. A `max-height` there wins, which puts the one flat 170mm cap back on every Auto picture, makes `print-img-lg` (140mm) *smaller* than Auto and makes `print-img-full` a no-op. The ladder must read 60 / 92 / 140 / 170mm — check it if you touch either rule.
+  - **Fill-in-the-blank must print BLANK.** `renderImportedBlockStudent`'s `fillblank` branch is `_fbReadonlyHtml`, a REVIEW rendering that puts each answer inside its slot — so a print path that falls through to it hands the class a worksheet with the answers already filled in. Both print builders carry an explicit `case 'fillblank'` that uses `_fbPrintHtml` (empty rules, all one standard width — see 🔲 A printed blank must not measure its own answer) and pushes `_fbAnswerKeyText` onto the key instead. Do not delete either case.
+  - **EVERY question gets an answer on the printed key** (`_pushBlockAnswerKey` / `_qFallbackKeySection` / `_akQuestionSections`, v1.284.0). Most answers live in an `answer` / `plainanswer` box and were always keyed; the rest do not, and were silently dropped — an **MCQ**'s correct option, an **`answerLine`**'s answer, a 🔑 **`answerKey`** block. A key that omits a question prints perfectly and looks tidy, so the teacher only finds out in front of the class.
+    - **`answerKeyExtras` gates EXPLANATIONS ONLY.** It used to gate the MCQ answer and the `answerKey` block too, and only the two past-paper call sites pass it — so every ordinary worksheet printed a key listing its handful of open-ended questions and nothing else, which is exactly the bug. An answer is never optional; an explanation is teaching commentary and stays behind the flag.
+    - **`_pushBlockAnswerKey(sections, block, part)` is the ONE pusher both print paths call** — `doPrintWorksheetOpen` and `buildWorksheetHtml` had drifted apart (path A keyed MCQs, path B did not), and a shared function is the only thing that stops that happening again. Adding an answer-bearing block type means adding a case there, not in two switches.
+    - **A question with nothing still gets a ROW.** No answer-bearing block at all → the explanation stands in (`_qFallbackKeySection`, labelled *Explanation*, never alongside a real answer); still nothing → the row says "No answer recorded for this question", because a gap in the numbering reads as a printing fault. The placeholder is substituted at RENDER time (`_akQuestionSections`) and is deliberately **not** what `hasAny` counts — a bank with no model answers must still print no key sheet at all, rather than a page of placeholders. That guard predates this and must stay.
+    - Run **`node tools/answer-key-tests.mjs`** after touching any of it.
+  - **📚 Teaching Notes are SHARED with the Ans Key annotator** (`polymathlc/anskey`, `index.html`). Both apps read and write `users/{adminUid}/teachingNotes/{id}` — one notebook, so notes uploaded on either side ground the AI on both. Keep the field names compatible, and ship a change to the shape in both repos together. `topics` is **this** app's syllabus list (`currentTopics()`), matched by exact string in `_notesMarkingBlock` / `_notesAnswerBlock`; Ans Key therefore writes it EMPTY (its notes read as general notes here, which is what a note from another app should be) and keeps its own free wording in `noteTopics` / `subjects` / `levels`. Renaming `keywords`, `markingStandards` or `keyFacts` here silently ungrounds the other app — nothing throws, the digests just come back empty. **`guidance` — the hand-typed standing instruction — is read here too since v1.309.0**; see **📌 The standing instruction** below. The **Scan app** (`polymathlc/scan`) is the third reader of the same notebook.
+  - **Roles are admin / employee / student.** `EMPLOYEE_EMAILS` (v1.235.0) names accounts hired to WRITE QUESTIONS: they get exactly the pages in `EMPLOYEE_PAGES` (create, bank, vetting, worksheet, myworksheets) and nothing else. **Three** rules keep it default-deny: `configureSidebarForRole('employee')` hides EVERY `.nav-item` and shows back only those pages, `navigateTo` rewrites any other page to `create` — hiding nav items alone would leave a bookmark or a deep link walking straight in — and **`_navAllowed(page)` guards every LATE nav show**. That third one is not optional: `rpgApplyVisibility` runs when the hero doc resolves, seconds AFTER the sidebar was locked down, and it turns `.rpg-el` (Character, Leaderboard, Adventure, Arcade, the Hide-game toggle) back on and calls `tcgApplyNavVisibility` / `fpsApplyNavVisibility`, which do the same for Realm of Embers and Science Strike. Until v1.240.0 the whole game menu reappeared for an employee a second after login. Anything that switches a nav item on after sign-in must ask `_navAllowed` (or `!_isEmployee()`) first, and the two game release banners (`fpsShowAnnounce`, `tcgAnnounceVisible`) do too. Gate authoring on **`_canAuthor()`** (admin OR employee), never by widening `_isAdmin()`, which keeps its old meaning everywhere else. An employee has **no bank of their own**: `_bankOwnerUid()` points `_qCol`/`_vCol`/`_qOwner`/`_vOwner` at the teacher's subtree, so `_resolveBankOwner()` must run (and `adminUid` be set) before anything reads or writes. Employees must never write `config/admin` — that pointer is what students resolve the bank from. **The account itself** is made in the admin's create-account dialog, which has a Student / Employee toggle (`csSetRole`, v1.240.0): an employee must be created with their REAL email (a synthetic `username@students…` address could never match `EMPLOYEE_EMAILS`), and the dialog refuses an address that is not already on that list rather than quietly handing out a student account. The `role` written to `userProfiles` is descriptive only — the live role is always decided at sign-in from `ADMIN_EMAILS` / `EMPLOYEE_EMAILS`. Firebase Auth rejects passwords under 6 characters, so that floor is not the app's to relax.
+  - **The Exam Paper builder** (`ep*` in `app.js`, `.ep-*` CSS + `#page-exampaper` in `index.html`, v1.241.0) takes a whole paper the way a teacher actually has one: question screenshots added ONE AT A TIME, the marking scheme added SEPARATELY, and the paper's own answers slotted into the built questions by **question number**. Available to anyone `_canAuthor()`.
+    - It is deliberately its own page and its own state. `handleBulkAiFile` (the bulk PDF import) streams a whole file straight into Vetting with no key step and nothing to check first; the block editor builds one question by hand. Neither can slot an answer key in — do not merge the three.
+    - **Nothing is written until Send.** The whole paper sits in `_epShots` / `_epKeyShots` in memory, so a mis-read screenshot can be removed and re-added before anything reaches the bank. `_epCommit` is the only writer, and it goes through `saveQuestion` / `saveVettingQuestion` like every other authoring path — so a running work session logs the questions automatically.
+    - **Screenshots are read as a RUN, never one question per screenshot** (v1.242.0). `_epRunBuild` sends them `EP_BATCH` (4) at a time as multiple images in ONE `askGeminiVision` call, and the model decides where each question starts and ends — so a question spread over three screenshots comes out as one question, and a screenshot holding three questions comes out as three. A question straddling a batch boundary is stitched back by the same `continuation` entry the bulk PDF import uses across a page break. Because of that, reading is always a read of the WHOLE set (`_epQuestions` is replaced, not appended to) — there is no honest way to re-read "only the new screenshots" and still get the boundaries right, so adding or removing one sets `_epDirty` and the page asks for a re-read rather than pretending the old questions still line up.
+    - Reading reuses the proven pipeline rather than forking it: `askGeminiVision` → `_parseAIJson` → `buildQuestionFromAi` → `_epCropInto` → `_tagDuplicate`. `_epCropInto` groups image blocks by the **`"page"`** index the model puts on each one (the same field and 1-based convention `_aiBuildQuestionPrompt` / `_autoFillDiagramsFromBoxes` already use for a multi-screenshot question) and crops each group from its own screenshot; an unnamed or out-of-range `page` falls back to the first screenshot of the batch, and a screenshot whose rectangles all fail gets attached whole so the figure is never silently lost.
+    - **The paper's question number never reaches the question** (`_epStripNumbering`, v1.241.1). 44(a) is stored as a question with no 44 anywhere and an OFFICIAL part (a): the number is dropped from the title and from the opening text block, and the part letter is lifted into `block.part` by `qPartDetect` — the same detector the Question Doctor uses, so a marker wrapped in `<strong>` is removed from the markup instead of being sliced out of the middle of a tag. Only TEXT blocks may open a part (`QPART_OPENER_TYPES`), a block holding 2+ markers is refused exactly as the Doctor refuses it, and when the wording carries no marker at all the letter is taken from the number instead (`_epPartFromNumber`). `_epNum` keeps the full "44a" — it is the answer-key link and nothing else. Two guards are load-bearing: `EP_LEAD_NUM_RE` ends in `(?!\d)` or "2.5 kg of ice was heated" opens with what looks like question 2 and the question starts "5 kg"; and a bare leading number needs a `.`/`)` after it (or a part marker behind it) before it counts as numbering, so "50 ml of water was added" survives. A title left empty by the strip falls back to the question's opening words, never to a row of identical "Untitled question" entries.
+    - **The link between a question and its answer is `_epNumKey(number)`**, which collapses `Q12 (b)`, `12b` and `12(B)` to the same key — a paper and its marking scheme almost never number a question the same way twice. The question prompt is told the number is what the key will be matched on; the key prompt is told the same. Every unmatched question is flagged in the ③ Match table with a per-row `<select>` so the admin can link it by hand (`epSetMatch`).
+    - **A question with parts is matched PART BY PART** (v1.244.0), because the paper numbers ONE question 44 while the marking scheme answers 44(a), 44(b), 44(c) on three separate lines — one row per question could never fill it in, which is why an OEQ's parts used to come out with nothing but the model's placeholder in them. `_epNumParts` splits a number into base + letter, `_epPartLetters` reads the parts off the blocks (`qBlockOpensPart`, so it is the same model the rest of the app uses), and `_epAnswerForPart` looks for `base+letter` — falling back to the roman sub-parts printed under it (`44(b)(i)`, `44(b)(ii)`), which `_epMergeAnswers` folds into one labelled answer rather than dropping. `_epApplyAnswer(q, a, part)` then places that answer **inside that part's own run of blocks** (`_epPartSpan` / `_epPlacePartAnswer`): it replaces the part's answer box, or inserts one at the end of the part when the model wrote none — never on top of the next part's. A question that matches NO per-part row still falls back to a whole-question row, which is how a question with no parts has always been matched. Three things keep it honest: `_epSlot` counts a question matched on only SOME of its parts as **partial** and both the ③ table and the Send dialog say so (the unmatched parts silently keep the model's placeholder); the ③ table gives a part its OWN `<select>` (`epSetMatch(qid, number, part)`), since one picker could only ever link one of three parts; and the single explanation block is rebuilt from `q._epEx` per part by `_epRebuildExplanation`, keeping the model's whole-question explanation while any part is still without an official note.
+    - **Parts have to be RECOGNISED before they can be matched**, so two things feed them: `_epSplitPartBlocks` splits a text block that holds several markers ("(a) …&lt;br&gt;(b) …") into one block per part — the Question Doctor refuses that case because it is rewriting vetted questions, but here the model wrote the block seconds ago from a screenshot that plainly had parts. It only ever splits when `<br>` is the only markup (`EP_ONLY_BR_RE` — the cut is a source offset, and slicing through a `<p>` would leave it unbalanced), when the letters are **lowercase and consecutive** (an uppercase `(A) (B) (C)` run is an options list), and **never inside a question with an `mcq` block** (those lettered lines are its statements). On the key side, `_epKeyNumber` gives a bare `(a)` row back the last full number seen (`_epKeyBase`), because a marking scheme very often prints "44" once with its parts listed underneath.
+    - **Every part gets its OWN explanation** (v1.245.0), because an explanation is read as explaining the question directly above it. The build prompt asks for one explanation block per part, placed after that part's answer; `qPlacePartExplanation` puts the key's note for a part inside that part (never merged with another part's, and a part the key says nothing about keeps the model's note); and `qScopeExplanations` repairs the case the model gets wrong. Both are shared with every other authoring path — see **Question parts** above.
+    - The part machinery itself is NOT the exam builder's own: `_epStripNumbering` only adds what is specific to a paper (dropping the printed number, and the number-derived part fallback) on top of `qSplitPartBlocks` / `qLiftPartMarkers` / `qScopeExplanations`, and the `_ep*` part helpers are one-line views of the shared `qPartSpan` / `qPartFind` / `qPlacePartExplanation` that take a whole question instead of a block list. Order matters: the number comes off the wording FIRST, because a marker hiding behind it ("45 (a) Name the process") cannot be lifted until it does.
+    - The AI writes a placeholder answer for every question (some numbers never appear on a key), and the official answer **replaces** it: `_epPlaceAnswerBlock` keeps the answer at its original index, `_epDropBlanks` clears the blanks that belonged to the old wording (they are word positions, so keeping them blanks the wrong words), and the key's explanation beats the model's. No prompt asks for `[[keywords]]` any more — a keyword is a teaching decision made by a person on the 🔑 panel (see **🔑 Keywords in a model answer** below), so `q.blanks` and `_epDropBlanks` are now housekeeping for an artefact nothing reads. `_epOptionIndex` accepts an MCQ answer printed as a number, a letter, or the option's own wording.
+  - **Mark Paper** (`mp*` in `app.js`, `.mp-*` CSS + `#page-markpaper` in `index.html`, v1.248.0) is the exam paper builder read backwards: `_ep*` takes a BLANK paper into the bank, this takes the same paper back once a student has WRITTEN on it. Scan every page, and the AI finds each question, transcribes the handwriting, marks the lot, and hands back the four things a teacher gives back — the **answer key**, the **student's own answer**, **feedback on everything they got wrong**, and a **report over the whole script**. Gated on `_canAuthor()`; the nav item is `admin-only` and `markpaper` is deliberately NOT on `EMPLOYEE_PAGES` (an employee is hired to write questions, not to mark a class), so the render gate is the one that would need nothing changing if that were ever revisited.
+    - **It is not Snap & Mark, and the two must not be merged.** Snap & Mark is the STUDENT's tool: one photo, one question, matched against a question that must already be **in the bank**, and it goes quiet the moment the question is not there. A marked script is the opposite case — thirty questions the bank has never seen over ten pages, and every one of them has to come back with a mark. So the questions here are read off the paper itself.
+    - **The answer key has three sources, best first, and every row says which it used**: 🔑 the paper's own marking scheme (scanned separately into ② and matched by number through `_epNumKey`, so "Q12 (b)", "12b" and "12(B)" are one key), 📚 a question in the bank that is plainly the same question (`_mpBankMatch` — the cheap `_snapTokens`/`_snapSim` overlap, NOT an AI call, with `MP_BANK_MIN_SIM` deliberately high at 0.62 because a wrong bank match marks the student against the wrong question entirely), then 🤖 the model's own answer. `_mpApplyMark` never lets the AI answer overwrite a key that came from the paper or the bank. The badge is not decoration — a teacher checking a mark has to know whether the key came off the paper or was written by the AI.
+    - **Reading and marking are separate passes on purpose.** `_mpReadScript` sends `MP_READ_BATCH` (3) pages as multiple images in ONE `askGeminiVision` call and reads pages as a RUN — a question running from the foot of one page to the top of the next is stitched back by the same `continuation` mechanism `_epRunBuild` uses across a batch boundary — and it is told to transcribe, never to mark. `_mpMarkAll` then marks from the transcription in text-only `askGemini` calls of `MP_MARK_BATCH` (6), which is why marking a thirty-question paper is not thirty vision calls. **A lettered part is its own item** (`8(a)` and `8(b)` are two entries), because that is how a marking scheme numbers them and how they are marked.
+    - **Nothing is written anywhere** — not the bank, not vetting, not Firestore. A marked script is a child's work; it lives in memory and leaves through `mpPrintReport` / `mpCopyReport`. Do not add a save path without deciding first whose data it is.
+    - Guards that keep a mark honest: `_mpMarks` defaults an unmarked question to 1 (MCQ) / 2 (written) and rejects an absurd count; `awarded` is clamped to `[0, marks]` and a `correct` verdict always earns FULL marks whatever the model returned; a blank answer can never be marked correct; a batch whose AI call FAILED is rendered `unmarked` with a note rather than a silent zero, which a teacher would read as "the student got this wrong"; and `mpSetVerdict` lets the teacher change any mark (the total follows) because AI marking of handwriting is very good and still not perfect. Changing the pages clears the marks (`_mpClearMarks`) — a stale mark is worse than no mark.
+  - **⚡ Rapid add works on a PHONE** (`_rapidTouch` / `rapidZoneClick` / `rapidPickFiles` / `_rapidPrepFile` in `app.js`, `.rapid-desk` / `.rapid-touch` CSS in `index.html`, v1.290.0). The pad was a paste target and nothing else, so on a phone it was **a box that could not be filled**: no Ctrl/⌘+V, nothing on the clipboard to paste, nothing to drag. The camera and the gallery are the way in there.
+    - **`(pointer: coarse)` is the whole gate** — the CSS classes and the JS predicate ask the same question. On a mouse the pad is the box it always was (same wording, same paste, same drop), and a touchscreen laptop driven by a trackpad reports a FINE pointer, so it keeps the paste pad too.
+    - **Both routes end at `startRapidJob`**, the ONE queue entry point, so a photo is read, cropped and filed exactly as a pasted screenshot is. Do not give the phone its own pipeline.
+    - **The picker's `value` is cleared BEFORE the files are queued.** An `<input type=file>` still holding last time's file fires no `change` for the same photo picked twice, so the second tap does nothing at all — a button that looks like it works and does not.
+    - **An oversized photo is SHRUNK, not refused** (`_rapidPrepFile`). A 12 MP camera photo is several times the 18 MB guard, so the guard alone refused the phone route for being the phone route. It only touches an image over `RAPID_SHRINK_OVER` (4 MB) — a pasted screenshot never reaches that and comes through byte-for-byte — and it re-encodes as **JPEG, never PNG**, or a photograph comes out bigger than it went in. The size check runs AFTER the shrink, and a failure there files the same red card a failed read does (`_failRapidJob`, which `processRapidJob`'s own catch now calls too): a screenshot that vanished silently reads as one that worked.
+  - **✅ Check Questions** (`cq*` in `app.js`, `.cq-*` CSS + `#page-checkq` in `index.html`, v1.288.0) serves the questions added MOST RECENTLY back to an author, one at a time, for a second pair of eyes. Available to anyone `_canAuthor()` — it is on `EMPLOYEE_PAGES`, because checking each other's questions is exactly the job an employee is hired for.
+    - **It is not the Question Doctor and the two must not be merged.** The Doctor is a whole-bank audit an admin runs occasionally and reads as a LIST of problems; this is a QUEUE worked through a question at a time, newest first, which never stops offering the next one. Marking one ✓ drops it out for good, so the page always knows what nobody has read yet.
+    - **The headline check is the reason the page exists**: a question whose TABLE OR DIAGRAM already sets out the four choices, with the options underneath repeating in words what the picture has already said. Those options should read just **(1) (2) (3) (4)** and let the picture do the work — `cqNumberOptions` writes exactly what the block editor's ＃ button (`mcqNumberOptions`) writes, so a question fixed from here and one fixed by hand come out identical.
+    - **Two layers find it, and neither can do the job alone.** Structurally it is decidable only when the choices are in a **`table` block** — the table labels its rows 1..n (`_cqTableLabelsChoices`, the strongest signal and no wording match needed), or ≥80% of an option's content words are already printed in the cells. The same question with a **picture** is invisible to any text check, so the AI pass attaches the diagrams (`_cqMedia` → `askGeminiVision`) and is asked about them FIRST. **Do not "optimise" that pass down to `askGemini`** — without the images the check cannot be made at all.
+    - **The one-tap fix must never be a guess.** `_cqMcqFixable` gates it on a real option list that is not already numbered, and the AI's `fix:"numberOptions"` is dropped unless that passes — the button blanks the wording of all four options, so offering it on a question whose choices are NOT in the picture destroys the question while looking tidy. The picture-only case therefore raises a **low-severity nudge with no fix button**, and that nudge stands down the moment the AI has answered.
+    - **`q.checked` lives on the QUESTION, not per user**, so two employees never read the same question twice, and it is written with a **quiet** save: reading a question is housekeeping, not a question authored, and must not land in anybody's work-session log. It is deliberately absent from `EDITOR_OWNED_QUESTION_FIELDS` so `carryOverQuestionMeta` keeps it across an edit. The ✓ advance is optimistic and rolls back if the write fails; ↩ Undo clears it again.
+    - The nav badge counts only the unchecked questions inside `CQ_RECENT_DAYS`, because a bank of several thousand older ones would show a number nobody could ever clear. The QUEUE still tops up past the window (`CQ_MIN_QUEUE`) rather than sitting empty while nothing has ever been read.
+    - Run **`node tools/check-questions-tests.mjs`** after touching any of it.
+  - **Work sessions** (`wk*` in `app.js`, `.wk-*` CSS + `#wkBar` + `#page-worksession` in `index.html`, v1.239.0) are how an author's hours and output are tracked: they press **Start session** on the ⏱️ Work Sessions page, and every question saved while the clock runs is logged with its title, topic, category, destination (bank / vetting) and time. Available to anyone `_canAuthor()` — the employee runs the clock, the admin reads everyone's.
+    - **The clock is two timestamps, never a counter.** `_wkElapsed` = `(endedAt || pausedAt || now) − startedAt − pausedMs`, so a minimised tab, a throttled `setInterval`, a sleeping laptop or a closed browser cost nothing: the 1-second tick only REPAINTS a value derived from the wall clock. Do not "fix" it by accumulating ticks — that is the exact bug this shape exists to prevent. The running session is mirrored to `localStorage` (keyed by uid) on every change, and `wkInit()` picks it back up on the next sign-in.
+    - `lastSeen` is a 60-second heartbeat meaning *the tab was demonstrably open at this moment*, and it is what an abandoned session gets closed at: on resume, a session past `WK_MAX_MS` (12h) of elapsed OR of idle is filed at its last heartbeat, not at whenever it was reopened. Hours when nobody was at the keyboard are not hours worked.
+    - **Questions are logged from `saveQuestion` / `saveVettingQuestion`** — the two functions every committed question goes through — so no authoring path (block editor, build-from-screenshot, rapid add, auto-vet, edit-to-bank) can be forgotten. Two things keep the count honest and must stay: `opts.quiet` writes are excluded (the usage backfill, auto-tagging, the part converter are housekeeping, not authoring), and `_wkSuppress` guards the automatic paths (`checkAndReleaseScheduledQuestions`, `loadSampleData`). **Both flags are read at CALL time into a local `wkLog`, before the `await`** — a job that fires saves off without awaiting them would otherwise have dropped its guard by the time they resolve. Entries dedupe by question id (`n` counts re-saves), and `uniq` keeps counting past the `WK_ITEMS_MAX` (500) list cap so the headline number never disagrees with the work done.
+    - Filed to **`workSessions/{uid}_{startedAt}`** (shared, so the admin can list everyone's) with **`users/{uid}/workSessions/{id}`** as the fallback if that collection is not open in the Firestore rules — a denied write must never stop the clock or lose the log. `wkLoadHistory` reads both, plus each `EMPLOYEE_EMAILS` author's own subtree when an admin is looking. If you add the shared collection to the rules, an author needs create/update on their own docs and the admin needs read on all of them.
+    - **One session covers ALL the author's windows, and every write MERGES** (v1.243.0). Each tab holds its own copy and each `setDoc`s the WHOLE session doc, so a plain overwrite meant the tab that saved last erased every question the other tabs had logged — work really done, gone from the log. `_wkStoreLocal` is therefore read-merge-write against localStorage, `_wkAdoptRemote` (fired by the `storage` event) folds another tab's copy in rather than fighting it, and `_wkFinish` files the UNION. `_wkMerge` must stay **idempotent** — the tabs echo the same state at each other: items union by question id, `savesByTab` counts per tab (a single `saves` total summed across tabs grows forever), `pauseSetAt` decides whose pause/resume is current, and any `endedAt` wins. `uniq` is DERIVED from the merged list under the item cap, never incremented, or a question logged in two windows counts twice. `_wkQueueSave` reads `_wkSession` when the timer FIRES, never a captured copy: a queued write holding the pre-merge object would file the session again without the other tab's questions.
+  - **Concurrent tabs** (`xt*` in `app.js`, v1.243.0) — authoring runs in several windows at once (Rapid add in one, the exam paper builder in another, the block editor in a third) and none of them may lose a question. Every question is its own document so the WRITES never collide; what needed fixing was everything around them.
+    - `xtInit()` opens a **BroadcastChannel** (`sq_tabs`), falling back to a `localStorage` key where it does not exist, and is bound at sign-in just before `wkInit()`. Messages are **hints, never data**: a tab is told an id changed and re-reads that document from Firestore, so two tabs can never talk each other into a state the database does not have.
+    - `_xtTabId()` is the tab's identity and lives in **`sessionStorage`** — per-tab, and kept across a reload. That is exactly the primitive the exam paper draft needs (a refresh finds its own paper; the window beside it keeps its own), so don't move it to localStorage.
+    - `saveQuestion` / `saveVettingQuestion` / `deleteQuestionDoc` / `deleteVettingDoc` call `_xtAnnounceQuestion`, and `_xtFlushQuestions` folds the change into the other windows' `questionBank` / `vettingList`, refreshes the counts and repaints the list only if that page is showing. It **debounces (500 ms) and batches** — an exam paper commit fires one message per question and would otherwise be forty round trips and forty repaints. It **reads first and applies after**, because `questionBank` / `vettingList` are re-assigned wholesale elsewhere and an index taken before an `await` can point into an array that no longer exists. A read that FAILS changes nothing — a network blip must never delete a question. `quiet` writes are deliberately silent (the usage backfill and auto-tagger walk the whole bank).
+    - `_xtGuardUnload` is a `beforeunload` warning while `_inflightOps > 0`, a Rapid add job is still reading, or the exam paper builder is mid-AI-call. That is the ONE way an added question really is lost: the document never leaves the tab.
+    - **The exam paper draft is mirrored to IndexedDB** (`_epDraft*`, store `sqDrafts/exampapers`) so an unsent paper survives a reload or a crash — nothing is written to the bank until Send, which is the point of the page and also the risk. Three records per draft, and the split is why opening the page is cheap: `epmeta:` (a few numbers — all the recovery banner needs, so a scan never pulls another window's 90 MB of screenshots into memory), `epwork:` (paper name, questions, answers — text, rewritten on every change) and `epshot:` (the screenshots, rewritten ONLY when `_epShotsSig()` changes). Keyed by **tab**, never by user, so two windows each building a paper cannot claim each other's work. `_epDraftSave()` hangs off `epRender()` — every mutation on that page ends in a render, so it is the one hook that cannot be forgotten. A draft left by a window that is GONE is offered back on the page (`_epDraftScan` pings the channel; every window still open answers, and whatever does not answer is recoverable) rather than claimed silently. Keys carry the uid explicitly for the pruner: a shared machine can hold another account's draft under the same tab id.
+  - **The whole-paper editor** (`ppPeRowHtml` / `ppPeFillPreviews`) renders each question through **`buildOpenBody`**, the same renderer every student surface uses, so the preview cannot drift from what a student is served; it is made inert with CSS (`.pp-pe-preview`), not by forking the renderer. Each row needs its OWN container selector (`#ppPePrev_<k>`) because buildOpenBody keys its answer stores by selector — the same selector twice silently clobbers the first question's model answers. `ppPeSet` deliberately never re-renders (caret preservation), so anything a row's HEADER repeats must be patched in place there; and `_ppPePrevCache` exists because `ppPeRender()` replaces the whole body on every renumber/sort/bulk stamp, which would otherwise rebuild forty question previews.
+  - **A saved worksheet's questions can be changed after the fact** (`wse*` in `app.js`, `.wse-*` CSS + `#wsEditOverlay` in `index.html`, v1.249.0). A saved worksheet is nothing but an ORDERED list of bank ids (`ws.questionIds`), so the editor edits that list — what is on the sheet on the left (remove ✕, reorder ▲▼), the bank to draw from on the right (＋ Add, filtered by level / topic / type / search). Everything else about the sheet is derived from that list, so the print layout, the cover, the practice queue and the preview all follow for free.
+    - It **never touches the question bank** — it only adds and removes references. Editing the question ITSELF is the quick-edit drawer (`wsQuickEdit`), which does write to the bank and says so. Keep the two apart.
+    - **Every change persists as it is made** (`_wsPersistWorksheet` — a list of ids is a tiny write, and an edit the teacher believes is saved and is not is far worse than a chatty connection). `_wseCommit` is the one place that fans a change out: persist → redraw the editor → redraw the My Worksheets card's count → re-render the live A4 preview if that is the sheet on show.
+    - Three entry points, ONE removal path (`wseRemoveFrom(wsId, qid)`, which takes the worksheet by id rather than reading the open editor, because the preview's own ✕ removes with the editor closed): the ✎ Questions button on the My Worksheets card, the same button in the preview bar (`wseOpenFromPreview`, shown only when `_wsPreviewSaved`), and the per-question `✕ remove` tool inside the preview. Removing must also drop the id from `wsManualBreaks` / `wsMergeUp` — those overrides are keyed by question id, so a break left behind would sit on whatever came after it.
+    - A worksheet doc lives under its OWNER's uid — a student's Ai-nstein worksheet is their own document — so anyone may edit their own, but `_wseBank()` caps a student's pickable bank with `qWithinStudentLevel`, the same rule every practice mode applies. An id whose question has since been DELETED from the bank gets its own row saying so rather than being silently dropped, which is the only place that stale entry is visible at all.
+  - **Question parts — (a) (b) (c)** live on `block.part` (v1.234.0). A block carrying a part OPENS it and every block after it INHERITS until the next opener, so a text block asking (b) and the answer box under it are both part (b) without the answer box saying so. Read it with `qPartMap(blocks)` / `qBlockOpensPart(b)` / `qHasParts(blocks)` — never write a second walker.
+    - **`block.part === QPART_NONE` (`'-'`) files a block under NO part** (v1.245.0) — it is how a note about the WHOLE question sits among the parts without lying about what it explains. It unfiles **that block only** and deliberately does NOT close the part (unlike a legacy `part` BLOCK), so an explanation in the middle of a question cannot detach every answer box printed after it. `qPartUnfiled(b)` is the predicate; the explanation block's header chip is a switch (`toggleBlockPartScope`) because only the author knows which of the two a given note is.
+    - **An explanation explains the question printed directly above it**, and that is enforced for EVERY authoring path, not just one (v1.246.0):
+      - **`qApplyAiParts(blocks)` runs inside `buildBlocksFromAi`** — the one function every AI authoring path goes through (Build from screenshot, Rapid add, the bulk PDF import, Regenerate copy, the exam paper builder) — so no path can be forgotten. Three steps in this order: `qSplitPartBlocks` (a text block holding "(a) …&lt;br&gt;(b) …" becomes one block per part), `qLiftPartMarkers` (a single leading marker moves off the text into `block.part`), `qScopeExplanations` (an explanation written for the whole question is split per part, or filed under none). The guards are what keep it safe: splitting needs `<br>` to be the only markup (`QPART_ONLY_BR_RE` — the cut is a source offset), lowercase consecutive letters, and no `mcq` block in the question; lifting inside an MCQ is allowed only on the question's FIRST text block, because every other lettered line down an MCQ is an option or a statement.
+      - **The AI buttons write for ONE part.** `aiGenerateBlockExplanation` and `aiGenerateBlockAnswer` both scope their prompt to the part the box sits in — the shared stem plus that part, marked `>>>` by `_aiPartScopeLine`, with the other parts passed as labelled background they are told not to write. The explanation button used to send the whole question, which is how a note under (a) ended up explaining (b) and (c).
+      - **Every build prompt carries `_partsPromptRules()`** — one marker per text block, an answer block per part, and one explanation per part placed after that part's answer. Keep the four prompts pointing at that one fragment (`_aiBuildQuestionPrompt`, `_bulkPagePrompt`, `_regenPrompt`, `_epQuestionPrompt`) rather than restating the rules, or they drift. `_serializeQuestionForRegen` tags each block with its part so a regenerated copy keeps them.
+      - **`qPartUnfileLoneExplanation`** marks the single explanation of a question that is only LATER split into parts (`autoNumberParts`, `qPartApplyScan`) as a whole-question note, because it was written before the parts existed. The marker renders **beside** the question (`_qpTextHtml`, a flex row — `block.content` is authored HTML that usually opens with a `<p>`, so a prepended inline span would break to its own line anyway) and is **never repeated above the answer box**: it reaches the AI marker through `_openSection`'s trailing `part` argument, which feeds `items[].label` without drawing a chip. **There is also a legacy `type: 'part'` BLOCK** (imported from the worksheet creator, with `.label`/`.content`); `qBlockOpensPart` folds it into the same model, so `b.type === 'part'` and `b.part` are different things and read almost identically in review. The part label reaches the AI marker through `items[].label` in `_openSection` (that string becomes `Part: [(b) Claim]` in the prompt), and through `_partPromptText` / `_questionContext`, which **re-insert the marker** — it used to be characters inside the stem text and reached the model for free. `_openSection` escapes its label because it is now author-influenced.
+    - Migration: **Question Doctor → 🔡 Question parts** (`qPartScanQuestion` / `qPartScanBank` / `qPartApplyScan`) converts typed "a)" markers into real parts, preview-first. `qPartDetect` matches a single letter **a–h** at the very start, parenthesised or not, closed by `)` or `.`, followed by whitespace. It stops at `h` on purpose (`i` collided with the roman-numeral sub-part `(i)`, which PSLE pairs with `(a)`/`(b)`), and a bare `X.` must be LOWERCASE (`E. coli` is prose, not part (e)). **`QPART_ASSIGN` is a separate, longer alphabet** for what the editor may ASSIGN (it only skips `i`) — detection has to be conservative about unvetted text, but an admin numbering by hand is not guessing. `autoNumberParts` must never write an EMPTY part: `qPartMap` inherits forward, so an unlabelled opener is filed under the PREVIOUS part and two answers end up sharing one heading — the very bug parts exist to prevent. It stops at the end of the alphabet and says so instead — and removes it from the ORIGINAL html (markers are often wrapped in `<strong>`, so a plain-text offset would cut through the markup). It refuses: a block holding 2+ markers, questions with no open-answer block, questions yielding fewer than 2 parts, and anything already using parts. `qPartWalkPlain`'s newline set must stay in step with `escapeHtmlKeepLines` (headings and table rows included) or a two-marker block collapses to one line and slips past that guard. **Apply re-resolves each question by id and checks the block still holds the scanned text**, then saves a COPY and only commits to `questionBank` on success — the preview survives navigation, so between scan and apply a question can be edited (a fresh object replaces the bank entry) or deleted, and writing the captured object back would undo the edit or resurrect the document. Don't loosen any of this without re-running the detection tests. `qPartAutoConvertInBackground` runs the same approved conversions automatically, once per load, four seconds after sign-in — the Doctor panel is for reviewing and for the cases the scan refuses, not a button anyone should have to remember.
+  - **🎯 Learning objectives are filed from BOTH ends** (`lo*` in `app.js`, the 🎯 Learning Objectives page + the question editor's own field, v1.287.0). The objective list is the admin's own document (`users/{adminUid}/settings/learningObjectives`), seeded from `SYLLABUS_LO_TOPICS` — the Learning Outcomes of the MOE Primary Science Syllabus 2023 — and editable from then on. There are two ways into it and they are one system:
+    - From the **objective's** end (the 🎯 page): open an objective and pick questions for it (`loOpenPicker`) or let `loAiFind` read the bank and suggest them. That writes `loData.map[loId] = [questionId]`.
+    - From the **question's** end (the editor's 🎯 field, ported from the math app): **＋ Add objectives** opens `qLoPickOverlay` and **✨ Suggest** (`loSuggestForEditor` → `loSuggestLos`) reads the question and proposes objectives. That writes **`q.los`** on the question itself.
+    - **`loQuestions(id)` reads both and dedupes**, which is what makes them one system rather than two: file a question from either end and it appears at the other. Anything that asks "what is already in this objective" must go through it — `_loCandidates` does, or the ＋ Add and 🤖 AI find pickers would offer a question that is already there. `loDetachQuestion` clears **both** ends for the same reason; leaving one puts the question straight back on the next render.
+    - **Nothing is written until the question is saved.** The picker ticks into `_loPickerSel`, Apply commits it to `editorLos`, and `collectQuestionData()` puts `los` on the question — so a wrong guess from ✨ Suggest costs one glance. `los` is in `EDITOR_OWNED_QUESTION_FIELDS`, or `carryOverQuestionMeta` would restore an objective the author had just removed.
+    - **`var editorLos`, not `let`** — the block sits near the END of the module and `navigateTo('create')`'s reset can reach `loEditorSet` before it is evaluated; a `let` would be in its temporal dead zone and take the whole app down. `loEditorSet`'s load call is wrapped for the same reason.
+    - **`qLos(q)` drops an unknown objective at READ time, and only once the list has LOADED.** The list is a document, so a question opened before it arrives would otherwise come back from the editor stripped of every objective it had — and be saved that way. `_loOrderIds` keeps an unrecognised id at the end for the same reason rather than filtering it out. Run **`node tools/objective-tag-tests.mjs`** after touching any of it: every failure here is silent — the filing is simply gone, and nothing throws.
+    - The chips and picker CSS are `.qlo-*` / `.qlop-*` and live **globally in `index.html`**, because the field is on the create page and `loStyles()` only ships with the 🎯 page. They are deliberately not `.lo-chip` / `.lo-pick-row`, which already mean a filter chip and a question row on that page.
+  - **Leaderboard prizes** all live in `app.js`: `rpgPrizeBadge` / `rpgRowClass` / `rpgBoardNote` render them and `rpgCheckPrizeClaim` drives the month-end claim prompt. To run a game board for a month with NO prize, add that month key to `RPG_NO_PRIZE_MONTHS` (e.g. `{ td: ["2026-08"], spire: ["2026-08"] }`) — the board still ranks, but the badge, the row highlight and the claim prompt are all suppressed. The 🔥 Embers tab (`rpgBoardTab === "tcg"`) ranks by **questions answered correctly inside the games** (`rpgRowGameQ`, off the published `games` block) and pays the **top 6**. It ranked on `tcg.power` until v1.233.0; power is bought with 🪙 points, so the board could be climbed without answering anything — do not rank any board on a currency-derived stat. Keep it in sync with the board inside the TCG page (`tcgRenderBoard`, which no longer requires a published team of 5) and with the prize banner copy in `index.html`.
+  - **The admin winners table** (Usage → 🎁 Prize claims, `_computePrizeWinners` / `renderPrizeClaims`) is where prizes actually get awarded, so EVERY board that pays a voucher must be listed there — questions, Defenders, Raiders, Spire, Strike, Ember Siege, Ember Legends, 🔥 Realm of Embers (top 6 by game questions answered correctly) and 🎴 Ember Duel (top 3 by duel questions × accuracy²). It reads whichever month the chips select (`setPrizeMonth`: last month, or the month in progress so a prize can be awarded on the 31st), pulling `month`/`monthLabel` or the rolled-over `last`/`lastKey` as needed, and skips any board in `RPG_NO_PRIZE_MONTHS` for that month. Adding a prize board without adding it here means a winner nobody can see.
+  - **Ember Legends** (`elg*` in `app.js`, `.elg-*` CSS in `index.html`) is the arena-survival mode inside Realm of Embers: the student plays AS one of their cards (`elgHeroStats` reads `tcgOwnStats`, so both progression tracks count), and the horde is drawn from the other cards. **All card art and FX frames go through `elgKeyed`** — a canvas pass that flood-fills the baked backdrop (including the chequerboard on the FX frames) in from the border to real transparency and caches the cut-out (border-connected removal, so a pale core inside the art survives; unkeyable scenes resolve null); sprites start in the rounded `.boxed` frame (which crops the raw backdrop), step out of it only once their cut-out is in place, and then stand free with drop-shadow glows on the SPAN (so emoji-fallback sprites glow too — keep status filters off the `img`); shots animate the element's `fly` frames with an orb stand-in until keying finishes, and impacts play the `hit` frames (`elgImpactFx`). Never blit a raw frame. Question HTML comes out of the bank with its own dark-on-white colours, so `.elg-quiz-q *` force-overrides colour and background — keep that or the stem goes invisible on the dark panel; `_tcgBankQuestions` carries each question's explanation block into `ex` (entity-decoded via `_htmlPlainText`, since consumers escapeHtml it again) — shown after answering here and in the trainer; the Siege deliberately does not show it (its quiz auto-advances too fast to read one). Skill trees belong to the **role** (`ELG_TREES`, keyed by `ELG_ROLE_BY_KIND` off the card's battle-skill kind), never to the individual card — add a node to a tree, not to a monster. Each tree is a radial WHEEL of 60 nodes over 6 rings (20 hand-written notables + 40 generated smalls from `ELG_SMALLS`/`ELG_SMALL_TIERS`) ending in two capstones; skills LEVEL — `r.tree[id]` is a number, capped by `elgNodeMax` (actives 3, one-of-a-kind mechanics 1, everything else 5; `elgPassives` multiplies `fx` by level, `elgCast` scales +30% power / −8% cd per level). Layout is `elgTreeLayout` (polar percent coords on a square map, links in an SVG 0-100 viewBox), reading/buying happens in the `elgRenderNodeInfo` panel (`elgTreeSel`). Unlocking is by **dependency links** (`ELG_REQS`: every non-T1 node names the node it grows from, one tier down — `elgNodeReachable` gates buys and `elgDrawTreeLinks` draws the SVG connectors); a new node MUST get an `ELG_REQS` entry or it is free-floating. An `act` node becomes a button on the skill bar (hotkeys 1–9 in bar order, T toggles the tree) and its `kind` must be handled in `elgCast` (nova/beam/storm/heal/shield/frost/zone/volley/dash/buff/orbit/aura/summon/chain), an `fx` node is a passive summed by `elgPassives`. 7★ heroes get a run-defining passive from `ELG_LEGEND_PASSIVES`. Beta-gated on `tcgConfig.legendsReleased` (`elgReleased` / `elgSetReleased`) — **released by default**: only an explicit `legendsReleased: false` hides it from students; while it is in beta the ⚔️ Legends board tab and its prize line stay hidden. Scores publish through the ordinary game-score path (`gameScores.legend` → `rpgGameBoardData("legend")`), and the board pays the **top 5** (`rpgGameTopN`).
+  - **Card sets and the National Day expansion** (`TCG_GEN2` / `TCG_SETS`, v1.251.0). The dex is built by flattening `TCG_GEN1` (151 monsters, `c001`–`c151`) and THEN `TCG_GEN2` (50 humans, `c152`–`c201`). **Ids are positional and live in every student's save** (`s.cards`, `merges`, `levels`, `team`, and the `tcgArt` overrides) — a new set must be APPENDED and gen 1 flattened first, or every collection in the school silently re-points at different cards. The National Day set is the **Lionheart Legion**: entirely human — warrior, paladin, wizard, sorceress, mage, warlock, necromancer — so its rows carry `class` and `sex` (and an optional per-card art note), and each card gets `human: true`. That flag is what switches `tcgCardArtPrompt` to `_tcgHumanArtPrompt` (draw a PERSON, with `TCG_CLASS_LOOK` per class) and re-words `tcgAvatarPrompt` ("keep the face, hair, armour, robes identical" instead of "keep the species and horns"). The human prompt's COMPOSITION / HARD RULES lines are deliberately **identical** to the monster prompt and its STYLE line says out loud that the card belongs to an existing painted set — a model given "fantasy warrior" with no other steer drifts into a different rendering style card by card, and the expansion has to sit in the same binder. Nothing else about art generation is new: the Card Art tab already walks `TCG_CARDS`, so every new card gets its 🃏 card-art and ⚔️ battle-avatar slots with paste / drop / upload / ✨ AI, and the avatar is still drawn FROM the card art.
+  - **Nothing that stands on nothing may keep a background** (v1.254.0) — battle avatars, element projectile frames and booster-pack frames. The rule is now enforced at the point of GENERATION rather than by guessing afterwards, because guessing is what hollowed a pack out: the model was asked for "empty", painted a near-black plate, and the cutter could not tell that plate from the pack's own dark navy panel (21 colour units apart, inside a tolerance of 30) — so the moment the packet was torn open the fill walked in through the tear and ate the interior. **`tools/bg-cut-tests.mjs` and `tools/chroma-key-tests.mjs` reproduce every case below against the real functions — run them after touching any of this.**
+    - **The chroma screen is the primary path.** An image model has no alpha channel: it MUST put a value in every pixel, so "leave it empty" is not an instruction it can follow and it invents a backdrop from context. `_screenRules(subject, screen, harder)` instead briefs ONE flat, named, fully saturated wall (`TCG_SCREENS`), and `_screenKeyOut` keys exactly that hue. That is a fact about COLOUR, not connectivity — so screen showing through a tear keys for the same reason the corners do, and a dark panel inside the pack never keys at all, wherever it sits. **The screen is chosen per subject** so it cannot occur in the art: `TCG_SCREEN_BY_ELEMENT` (magenta, green for the violet/pink elements, blue for the green ones) and `tcgScreenForSet` (the National Day set is red-and-white heraldry, so green).
+    - **A WIDE effect needs a different ring test** (v1.277.0). The border-ring precondition below assumes a subject that stands clear of the edges. A duel zone wall does the opposite — it fills the frame left to right by design — so only the top edge is left on the screen, the whole-ring test refused at ~50%, and the frames were saved with a band of magenta still across the top. A slot marked `wide` (threaded from `DUEL_FX_SHAPES[].wide` through `_tcgGenClean`) relaxes the ring to `TCG_SCREEN_RING_WIDE` **but must still show one WHOLE edge** at `TCG_SCREEN_EDGE_MIN` — that is what keeps it evidence of a wall rather than a licence to key anything containing the hue. The wide prompts also now ask for a clean band across the top, so there is always an edge to prove it by.
+    - **✏️ Touch up is the SAME editor as the question adder's** (`tcgTouchUpSlot` → `_annotOpenSrc`, v1.278.0). `openAnnotTool` was split: `_annotOpenSrc(srcPromise, target, title)` opens the editor on any picture, and `target` says where **Apply** writes it back — `{ blockId }` for a question's image block or `{ artSlot }` for a Realm of Embers slot. Every slot with a picture gets the button, card art included, so erase / paint / fill / clone / history / select / lasso / wand / move / resize / rotate / skew / straighten / line / text / AI content-aware fill all work on game art with **no second editor** existing to drift out of step with the first. Add a destination by adding a branch in `applyAnnotTool`, never by forking the tool.
+      - An art slot is saved with **`{ cleaned: true }`** — the admin has just spent time on this picture in an editor, so `_tcgArtStore`'s automatic background cutter must not run behind them and second-guess it. 🧼 Remove background is on the same slot for when they do want it.
+      - **Erasing CUTS rather than paints white** when the editor was opened on an art slot (`_annot.eraseTo`, v1.279.0), and the ⬜/▨ button in the toolbar flips it. A scanned question is paper, so rubbing a word out means painting it white; a sprite stands on nothing, so erasing must mean erasing. **Four things follow the setting** — the erase brush (`_annotPaintCompose`, which switches the canvas to `destination-out`), the paint bucket, the hole the Move tool leaves (`_annotSelLift`), and the corners a whole-picture rotate opens up. Miss one and a sprite comes back boxed in white.
+      - **`_annotPaintCompose` sets the composite mode for a WHOLE stroke** — the drag continues in `pointermove` against the same context — and `_annotUp` puts it back. `_annotSetTool` resets it too: a canvas stranded in `destination-out` erases everything drawn afterwards.
+      - **Delete cuts the selection to transparent** (`annotSelDelete`, the Delete/Backspace key and the 🧽 button). With the 🪄 wand's Alt+click, which selects a colour across the WHOLE picture, that is the one-step "remove every pixel of this colour" the art slots need. A polygon selection is cut with a real clip so the edge is anti-aliased; a wand mask is cleared pixel by pixel.
+      - The save path is **PNG end to end** and must stay that way: `toDataURL('image/png')` → `_scaleDownDataUrl` (which re-encodes as PNG, or returns the original untouched when it is already small enough) → `uploadImageDataUrl`, which takes the extension from the data URL's own mime type. Any JPEG step anywhere in that chain flattens the alpha to black.
+      - **The brush cursor is a RING at the real size of the mark** (`ANNOT_RING_TOOLS` / `_annotUpdateBrushRing` / `_annotTrackPointer` / `_annotBrushFlash`, v1.285.0). A brush whose size you can only read as a number on a slider is a brush you are guessing with — "12 px" at 40% zoom is a quarter of the mark "12 px" makes at 400% — so erase, paint, clone, history and line draw their footprint under the pointer at the current zoom, and the system cursor is hidden under it. The tools that take no size (fill, wand, select, lasso, move, the transforms, text) show no ring: a circle round a paint bucket would be a lie, and `_annotUpdateBrushRing` only ever touches `canvas.style.cursor` for a tool that IS in `ANNOT_RING_TOOLS`, or it would fight the resize handles' own cursors. The ring lives in the STAGE like the clone-source pin, never on the canvas (which is scaled and panned underneath it), and `_annotUpdateTransform` redraws it because the size on screen is `size × displayScale`. Under `ANNOT_RING_TINY` screen px it draws a crosshair instead — a 3px circle is a blob. `_annotSyncControls` is the ONE place every route to the size lands (slider, wheel, `[` / `]`), so the "12 px" badge flashes from there; with the pointer away it previews in the middle of the view, because a size change that only moves a number on a slider is the thing this fixes. **`math`'s `index.html` carries the same editor — keep the two in step.**
+      - **A picture can be PASTED straight in** (`_annotPasteHandler` / `_annotPasteImage` / `annotPasteFromClipboard`, v1.286.0). Ctrl+V — or the 📋 button, for the browsers that will let a page read the clipboard — drops whatever is on it onto the canvas, scaled to **fit inside** what it is landing on (`ANNOT_PASTE_FIT`, 90%, never blown up past its own pixels), and opens the transform box on it with **Resize already the tool in hand**, so the eight handles are live from the first moment: drag a corner to size it, drag the middle to move it, then ✓ Apply. That is the PowerPoint gesture, which is the one everybody already has in their fingers.
+        - It is its **own transform scope, `paste`** — not a selection lift. The pixels do not come off the canvas, so `base` is the picture untouched and Cancel (or Esc, or the history step taken on arrival) leaves no trace of it.
+        - **`_annotXformIsIdentity` must return false for a paste.** A picture dropped at 100% and 0° is otherwise read as "nothing to do", and both ✓ Apply and the settle-on-tool-switch in `_annotSetTool` would silently throw it away. That is the one bug this scope can produce, and it looks exactly like the paste never happened.
+        - The layer keeps the pasted picture at its **own** resolution (capped by `ANNOT_PASTE_MAX_PX`) and the fit is carried by the transform's `sx`/`sy` — so dragging a handle back OUT resamples from the full bitmap instead of magnifying an already-shrunken one.
+        - The handler is bound in **capture** (`_annotBindZoomListeners`) and unbound with the editor, because the exam paper builder, Mark Paper and the contenteditable guard all listen for `paste` on the page underneath the overlay. A label being typed keeps its own paste — pasting words into a text box is the other honest meaning of Ctrl+V in here.
+      - The canvas keeps its **alpha**, so an already-cut sprite is edited transparent; `#annotCanvas` wears a grey check so the empty parts are visible. That is the EDITOR's backdrop, not something painted into a picture — unrelated to the chequerboard an image model paints, which is still banned in prompts.
+    - **🧼 Remove background is the manual override** (`tcgCleanSlotBg` / `_tcgPlateColour` / `_tcgKeyPlate`, v1.277.0) — a button on every slot that stands on nothing, plus one per duel-FX run. The automatic key REFUSES rather than risk holing the artwork, and a refusal means the frame is saved with its plate still in; the admin can see the colour that sticks out, so they get to say so. It finds whatever flat colour the border is actually made of (any colour, not just the three named screens) and removes exactly that: still a colour test, never a flood fill, so it cannot walk into the artwork through a gap. Evidence of a plate mirrors the keyer — `TCG_PLATE_RING_MIN` of the whole border **or** `TCG_PLATE_EDGE_MIN` of one edge. It refuses when the result would keep less than `TCG_BG_KEEP_MIN` of the artwork, which is the one failure a background remover can produce that looks tidy and has destroyed the picture.
+    - **Do NOT ask a model for a transparent background.** The request comes up every time someone sees a coloured plate, and it makes things worse — an image model has no alpha channel, so "transparent" is painted rather than honoured, as a chequerboard or a flat plate. `TCG_BANNED_PROMPT_RE` flags the words. The chroma screen exists precisely because it is the only instruction a model CAN follow; when a plate survives, fix the KEY (above) or press 🧼, never the prompt.
+    - **An enclosed patch of screen colour is a HOLE or it is PAINT, and the test is GEOMETRY** (v1.280.0). The strict guard used to count every screen pixel not connected to the border as "the model painted the key colour onto the subject" and refuse the whole key. A **ring** — a brooch, a torc, an ankh's eye, a lens in a bezel, a shield dome, a rune circle — has real wall showing through a hole that never touches the border, so it was refused and the picture shipped with a solid disc of screen colour in it. That is the Iron Pin bug.
+      - Colour cannot separate the two: a flat patch painted in the wall's colour *is* the wall's colour, and an absolute RGB comparison against the border also breaks on a vignetted wall, which is the commonest way a model misses "flat". So each enclosed region is **measured**: `shell` (the thinnest crossing of subject material between the region and the real background, from a chamfer distance transform) against `rad` (the region's own inscribed radius). A ring is **mostly hole** — `shell <= rad * TCG_HOLE_SHELL_MAX`. Paint is a patch deep inside a mass and fails by a wide margin.
+      - The `dn` mean/spread vetoes (`TCG_HOLE_DN_MIN` / `TCG_HOLE_DN_SD_MAX`) are the SECOND line, not the first: a real painted gem is faceted and specular so its spread gives it away, but a synthetically flat one would not — and `dn` is brightness-normalised, so both stats survive a vignette. `TCG_SCREEN_HOLE_MAX` keeps its value and now budgets **paint only**.
+      - Two harness cases pin the rule from both sides: a ring's interior must key, and the same patch inside a THICK body must still be refused. Known limit, unchanged: a flat gem painted in exactly the wall colour inside a thin bezel is the same pixels as a ring and cannot be told apart — the defences there are the per-element screen routing and the prompt.
+    - **`_bgLeftover` only ever inspects the border ring and the corners**, so it is structurally incapable of seeing a plate in the MIDDLE of a frame — a disc walled in behind a ring sailed past it and was saved. `_tcgGenClean` now also asks **`_screenStillThere(url, screen)`**, which is a whole-frame question with no false positives: the subject is briefed never to contain the screen colour, so any of it left anywhere is background that was not removed.
+    - **Only the plate keyer can reach a colour walled in behind the artwork.** Every other cleaner here (`_stripImageBackground`, `_tcgForceClean`, `_recleanStoredArt`'s first two steps) is seeded from the frame edge and cannot get inside a closed ring. So `_tcgKeyPlate` gained `_tcgEnclosedPlateColour` — the largest connected block of one flat colour that is **walled in**: every pixel surrounded by paint, never touching the frame edge or transparency. That predicate is what makes it safe, because the subject *always* meets the transparency cut away around it and so can never be mistaken for a plate, however big or flat. `_tcgPlateColour` also stopped counting transparent border pixels in its denominator, which had made its thresholds unreachable on exactly the already-cut frames the 🧼 button is for. The 🧽 repair sweep runs the plate keyer too, so art already saved dirty is fixed without redrawing it.
+    - **Three preconditions gate the key, and they are why it is safe**: enough of the frame is the screen colour; the BORDER RING is ≥90% screen (containing the hue is not the same as being shot against it); and for a strict slot no more than `TCG_SCREEN_HOLE_MAX` of the frame is screen colour ENCLOSED inside the subject (the model painting the key colour into the art). Any of them failing falls back to the cautious knock-out — never to a hole. Known limit: key colour on the subject's OUTER edge is contiguous with the wall and no colour test can separate it; the routing table and the prompt are the defence there.
+    - **Store the keyed frame, chain the SCREEN one.** A model cannot read alpha — hand it the keyed PNG and the canvas flattens it to solid black, so it is shown a sprite on a black plate and told that is the background. `_tcgGenClean` returns `{ url, ref }` and every run stores `url` and chains `ref`; a frame reloaded from storage goes through `_tcgRefOnScreen` → `_screenBack`, which composites it back onto its wall. The prompt asserts the reference is on the screen, so it must actually BE on the screen — `_screened()` exists to keep that true on the fallback paths too.
+    - **The knock-out is still there for legacy and pasted art, and it is what got the guards.** `_BG_STEP_TOL`: a pixel is background only if it is ALSO a small STEP from the pixel the fill arrived from — backdrops are smooth, the edge of a subject is not. Emptiness must not conduct: only pixels that were ALREADY empty when the call started pass freely, and stepping out of emptiness into paint has to land within `_BG_SEED_TOL` of the plate itself. `_cutHoleArea` throws the whole pass away if it took painted pixels that are not reachable from the frame edge, and `_tcgForceClean` rejects a forced cut that costs more than `TCG_BG_KEEP_MIN` of the painted pixels. Nothing checked the SUBJECT survived before v1.254.0 — a hollowed sprite is the cleanest possible result to a background detector.
+    - **The chequerboard cutter is the other way a sprite gets deleted**, and it runs first with none of the fill's guards. Three fixes: a chequerboard is a BACKGROUND, so `_checkerOnBorder` requires the pattern to be on the frame edge (scale armour and a woven inner panel are not); `_nearNeutral` measures saturation rather than an absolute spread (a dark navy is not "near enough to grey"); and cutting needs positive evidence of alternation — the old "isolated speck, bias to cutting it" clause deleted an already-cut sprite on the second pass, because every probe landed on transparency. `sq` is capped at a twelfth of the short side.
+    - **Every picture goes through the cutter more than once** (generate, store, display, repair), so the already-a-cut-out early-out runs FIRST, before the chequer stage, and `_tcgArtStore` takes `{ cleaned: true }` from the generate paths. Card art and `set:` banners are never cut at all.
+    - **`_bgLeftover(url, strict)` is the background check.** `strict` means "this sprite must stand clear of the edges": a still-opaque border ring or a filled CORNER is a backdrop whatever colour it is, which is what catches gradient and vignette plates. It is on for avatars and pack frames, and off for the FX `blast` phase and pack frames 5–6, whose brief is to fill the frame.
+    - **Never say "transparent", "chequerboard" or "alpha channel" in a prompt** — a model paints the word rather than honouring it. `TCG_BANNED_PROMPT_RE` logs it in `tcgGenArtImage` if one creeps back, which is how two of them survived in animation step descriptions. And never ask the ENGINE for transparency while briefing a screen: `background:'transparent'` on gpt-image-1 knocks out interior regions of the subject that match the background — the same bug from the other direction.
+  - **The rip stage must never borrow `.tcg-pack-<tier>`** (v1.253.2). Those classes carry the shop CARD's border and its `0 0 0 1px` box-shadow ring, so using them on the overlay just to pick up `--halo` drew a rectangle around the pack. The stage uses `.tcg-rip-<tier>`, which sets `--halo` and nothing else.
+  - **The pack-opening face is the ART and the RARITY** (v1.253.1) — `tcgCardHtml(card, {reveal:true})` adds `.reveal`, which squares the art off (`aspect-ratio: 1/1`), grows the star pips, spells the rarity out (`TCG_RARITY` / `tcgRarityHtml`, coloured per tier) and shrinks the stats to a footnote. The skill text, both level tracks and the affinity triangle are **not rendered at all** on that face — every one of them is still on the Collection card, which is where a student reads them at leisure. **There is no confetti on a pack**, on the tear-open burst or on a 7★ flip: paper falling over a legendary cheapens it. `tcgConfetti` survives for winning an arena battle, which is earned.
+  - **A set is BILLED, not just listed** (v1.253.0). Each entry in `TCG_SETS` carries a `series` line, a `title`, a `sub` and an `art` direction: the original dex is **Primal Dominion**, and the National Day expansion — entirely human — is the **Lionheart Legion · Rise of Humanity**. The Packs tab opens with one banner per set (`tcgSetPickHtml` → `.tcg-setpick`): the set's own artwork behind, the series line over the title, and the set's **7★ legends** (`tcgSetHeroes`) lined up along the bottom with their card art in them, so a student can see what they are chasing before they spend a point. Every pack card repeats the chosen set (`.tcg-pack-from`) because that is the moment the points actually go.
+    - **The set NAME is never drawn by the AI.** `tcgSetArtPrompt` asks for a clean picture and the name is set in **Cinzel** over it (`.tcg-setpick-title`, gradient-filled) — an image model asked for lettering returns gibberish, and gibberish across the top of the Packs tab is worse than no artwork. Cinzel is already in the ONE font request; do not add another for a set name.
+    - The artwork lives in the ordinary art slot `set:<key>` — paste / drop / upload / ✨ AI on the Card Art tab like every other slot — and is drawn **from the set's own 7★ card art**: `_tcgSetRefSheet` composites those cards into one line-up because `tcgGenArtImage` takes a SINGLE reference picture, which is what keeps the legends on the banner the same characters as the cards. No 7★ art yet → no sheet, and the model works from the words alone. `set:` slots get the biggest `maxSide` (768) in `_tcgArtStore` and are NOT background-stripped — a banner keeps its painted scene.
+  - **Booster packs are SET-SCOPED, and each one tears open on screen** (`tcgPackSet` / `TCG_PACK_STEPS` / `tcgShowReveal`, v1.252.0). The Packs tab carries a set chooser, and `_tcgRollCard(odds, setKey)` pulls only from that set — that is what lets a student chase the National Day cards instead of hoping. An empty pool falls back to the whole dex rather than returning `undefined` and killing the open. Note the side effect: scoping the pool makes a given set's 7★ easier to land on a 7★ roll (2 of 2 rather than 2 of 5), so retune `odds` rather than the pool if that ever needs pulling back.
+    - **The opening animation is 7 frames per set × tier** (`pk:<set>:<tier>:<n>`, 2 × 3 × 7 = 42 slots), authored on the Card Art tab exactly like the element FX: every frame is drawn **FROM the one before it** (`_tcgPackRunFrames`), because seven independently-drawn pictures of a packet are seven different packets. `tcgPackFramePrompt` therefore says outright that the pack must not move, resize or be redesigned between frames, and carries the same anti-chequerboard paragraph the FX and avatar prompts do.
+    - **A pack stands on NOTHING** (v1.252.1) — just its own `--halo` glow — so pack frames join the battle avatars and the element FX in `_tcgArtStore`'s background knock-out (`_stripImageBackground`), and `_tcgGenPackClean` mirrors `_tcgGenFxClean` exactly: cut the backdrop out BEFORE the picture is chained onward (the next frame is drawn *from* it, so a plate left in is copied through the whole tear) and check the result with `_bgLeftover`, redrawing once with a blunter prompt rather than saving a dirty frame. Frames drawn before that existed are repaired in place by the shared 🧽 **Clean painted backgrounds** sweep (`tcgRepairArtBackgrounds`, now covering `pk:` too, and falling back to `_urlToDataUrlRobust` when the Storage fetch taints the canvas) — the button sits in both the FX and the pack panel and is found by class, not id. Until someone presses it the two STUDENT surfaces cut the plate out for display only (`_tcgPackImgHtml` + `tcgKeyPackImgs` → `_tcgPackDisplayClean`, which runs the SAME cleaner the generator does — two cleaners disagreeing is how a plate ends up on screen that the admin panel swears is gone); the admin's Card Art thumbnails are deliberately left RAW, because that panel is where the plate has to be visible or nobody would know to press the button.
+    - **A partial run never plays.** `tcgPackAnimReady` requires all 7; anything less and `tcgShowReveal` falls straight through to `_tcgShowRevealCards`, which is the old behaviour. Half a tear looks broken, and this is what keeps the feature safe to ship before any art exists.
+    - The tier **halo** (bronze / silver / gold) is one CSS custom property, `--halo`, set on `.tcg-pack-<tier>` and painted by a `::before` ring *behind* the art — so a generated PNG gets the same halo the inline SVG placeholder does, and the rip overlay reuses the same variable.
+  - **👁 What a monster does in THIS game** (`tcgPeekOpen` / `tcgPeekHtml` / `tcgEyeHtml`, `.tcg-peek*` / `.tcg-eye` CSS, v1.273.0). One monster means four different things: Crystal Aegis is a shield in the Battle Arena, a 🛡️ Wall that blocks a lane in Ember Siege, a Warden's skill tree in Ember Legends and Divine Shield in a duel. Printing all four wherever a card appears is how a student learns to ignore the text, so **every picker shows exactly ONE — the one that fires in the game they are standing in**: `arena` → the printed arena skill, the arena stat block and the affinity matchups; `siege` → the lane behaviour (`emsBehaviour`/`emsRole`, never the arena skill, because the Siege *translates* it) plus the summon's cost / HP / attack / recharge; `legends` → the role whose skill tree the points go into, the hero's own body, and the 7★ passive. Adding a mode is a row in `TCG_PEEK_MODES` plus a branch in `tcgPeekHtml`.
+    - **The pack reveal is the ONE place that shows all four at once** (`tcgAllModesHtml` / `tcgRevealDetail`, `.tcg-reveal-side` CSS, v1.283.0). A picker answers "what does this do in the game I am standing in"; a pack answers "what have I just won", and the honest answer to that is every mode. Hovering a flipped card fills the panel beside the cards — which is what the reveal's empty right-hand side was for — with the arena skill and stat block, the duel ability and its 4/4, the Siege lane behaviour, and the Legends tree, plus the artifact's effect at its current level.
+      - `_tcgModeBodyHtml(card, mode)` is the shared body builder both surfaces call, so the two can never disagree; `tcgPeekHtml` is head + ONE body and `tcgAllModesHtml` is head + all of them. Adding a mode is a row in `TCG_ALL_MODES` on top of the `TCG_PEEK_MODES` entry.
+      - **The panel is its own SCROLL REGION, and that is the fix for both of the bugs it shipped with** (v1.283.2). `.tcg-reveal-inner` is a column — the title is fixed and the two columns under it scroll independently — because when the whole overlay was one scroller, reading down the panel scrolled the CARDS, which dragged the cursor across a different card, which replaced what was being read. Two guards close the rest: any wheel/scroll/touchmove inside the overlay freezes the hover swap for `TCG_REVEAL_SCROLL_HOLD`, and **clicking a flipped card HOLDS the panel on it** (`_tcgRevealPin`) until it is clicked again. `overscroll-behavior: contain` stops a wheel running off the end of the panel from carrying on into the cards.
+      - **A face-down card shows nothing.** The flip is the moment, and printing the answer beside an unflipped card gives it away — `tcgRevealDetail` returns the empty state until `.flipped` is on.
+    - It opens on a **click of the 👁, never on hover**. These pickers are used on school phones mid-battle — the Siege deck tile is 54px and its only previous description was a browser `title` tooltip, which touch can never reach.
+    - The 👁 goes **outside** the tile on the Siege and Legends pickers (`.ems-card-wrap` / `.elg-pick-wrap`): both tiles are `<button>`s and a button may not contain a button. On a full `tcgCardHtml` card it goes inside (the root is a div) via `opts.eye`, and it must `stopPropagation` — the card's own click adds or drops the monster from the team.
+  - **🌋 Ember Siege — NO question is timed** (`EMS_MANA_CORRECT`, v1.272.0). The ⚡ Generate mana panel used to carry a draining speed bar worth up to `EMS_MANA_SPEED` of extra mana, so a student who read a long stem properly earned less than one who guessed at it — the opposite of what this app is for, and the same mistake the rushed-answer guard exists to prevent. There is now **one flat rate** (`EMS_MANA_CORRECT`, the full rate the untimed wave round already paid) in the wave round and mid-battle alike; `EMS_FAST_MS` / `EMS_MANA_BASE` / `EMS_MANA_SPEED` and `emsQuizSpeedTick` are gone. Do not reintroduce a clock on the question: the mode keeps its pressure from the **horde**, which walks on the gate while the panel is open, so thinking still costs ground on the field — it just no longer costs mana. `ms` is still measured and still passed to `rpgAwardGameQuestion`, because that is the rushed-answer guard and it is a different thing entirely.
+  - **Adding a skill `kind` touches FIVE places** and `tcgStats` **throws** if you miss one: `TCG_SKILLS` (the skill), `TCG_ROLE_MODS[kind]` (the stat spread — this is the one that throws), the arena resolver's if/else chain in `_tcgAct`, `ELG_ROLE_BY_KIND` (Ember Legends' skill tree) and `EMS_SKILL_FX[kind]` (Ember Siege). The Siege entry must reuse an **existing lane `mode`** — the mode is what the siege engine actually implements, so a new kind gets its own label and tuning without new lane behaviour. The National Day 7★ pair added `slay` (Dragonfall Execution — one blow, ignores DEF, plus `exec` × the target's MAX HP dealt straight to hp and never lethal on its own) and `frostreign` (Winter's Crown — hits the whole enemy team and stuns all of it).
+  - **The game's full name is the "Realm of Embers Trading Card Game"** (v1.256.0) — the page header, the release banner and post, the release/beta confirms and toasts, the admin banner and the How to Play title all spell it out. "Realm of Embers" alone is still right where space is tight (the nav item, the guide's prose, the theme class); "Realm of Embers TCG" is not used in any user-facing string any more. **`tcgCreditsHtml()`** is the colophon that closes BOTH the 📜 Lore tab and the 📘 How to Play tab — the two places a student is reading rather than playing — crediting **Polymath Learning Centre** as the organisation that built the realm and **Mr Chung** as its Game Master. The names live in `TCG_CREDITS`, so a rebrand is one edit; the seal wears the realm's logo when one has been drawn.
+  - **Ember Duel** (`duel*` / `DUEL_*` in `app.js`, `.duel-*` CSS in `index.html`, v1.262.0) is the Hearthstone-style card duel inside Realm of Embers: two heroes on `DUEL_HERO_HP` (30), a mana crystal a turn to `DUEL_MANA_CAP`, minions summoned onto a board of `DUEL_BOARD_MAX`, spells, and an attack made by **dragging** one of your cards onto one of theirs. Three things carry the design:
+    - **A card keeps its arena skill and GAINS a duel ability**, generated from the same `TCG_SKILLS[...].kind` that skill already uses (`DUEL_ABILITIES` → `duelAbility(card)`). Nothing is written per card, so all 201 have one and a future set needs nothing added. **`duelAbility` must keep its `|| DUEL_ABILITIES.strike` fallback** — a new skill kind added to `TCG_SKILLS` without a row here would otherwise be a crash on the play path (the same trap as `TCG_ROLE_MODS`, which throws).
+    - **Two legends must not do the same job.** Aeonyx's `chrono` was a bare "freeze every enemy minion", which made the keeper of the Ember a strictly WORSE Ariselle — she freezes the board too, *and* deals damage, *and* brings Taunt (v1.265.0). They now read as different cards: **Ariselle is the WALL** (Taunt, freeze, chip), **Aeonyx is the TURN ITSELF** (freeze, bigger damage, and `me.mana = me.cap` — nothing else in the realm gives a student their mana back, which is what "time runs back" has to mean). Check a new signature against the others before shipping it: a 7★ that is a subset of another 7★ is a bug, not a balance choice.
+    - **Rarity IS power, and `card.stars` is the only knob.** Each row's `v(stars)` turns the star rating into the ability's numbers, and `duelCardStats` prices the card at `stars + 1` mana. Retune the `v` functions, never individual cards. `DUEL_ATK_MAX` / `DUEL_HP_MAX` cap a fully trained 7★ — keep the caps; the divisors are the tuning knob.
+    - **It is DEFAULT-CLOSED**, and that is the one thing not to copy from Ember Legends: `duelReleased()` uses `tcgReleased`'s `!!` shape, NOT `elgReleased`'s `!== false`. `_tcgConfig` is null until the config load resolves, so `!!` fails CLOSED and a student never gets a flash of a mode still being play-tested. The admin's **🚀 Launch to students** button on the Game Modes card is the only way it turns on.
+    - **The effect queue is load-bearing.** `duelRender()` replaces the whole shell's `innerHTML`, so an animation started while the rules are still resolving is destroyed the instant the board repaints — which is exactly what happened to the attack animation first time round. `duelFx` / `duelFxHero` / `duelAttackFx` therefore only QUEUE (`r.fxq`); `duelRender()` flushes them against the DOM it has just painted. For the same reason `duelKill` marks a minion `dead` (rules) **and** `dying` (still drawn), and `duelReap` sweeps it 480 ms later — **every rules query filters `!m.dead`, only the renderer shows `dying`**.
+    - The drag is built on **pointer events**, not HTML5 drag-and-drop, because `dragstart` never fires on touch and this is aimed at school phones; `duelHitTest` compares live rectangles rather than using `elementFromPoint` (the dragged card sits under the pointer and would swallow every hit). There is always a **tap-select → tap-target** fallback, which is also how spells choose a target.
+    - **A card RANKS UP every `DUEL_RANK_EVERY` (10) training levels** (v1.264.0) — one upgrade each, nine in a card's life, and this is the only way levels reach the duel. Elsewhere a level is a smooth 1.5%; in a duel a card is 4/3 for 2 mana and a number that reads the same after fifty questions has rewarded nobody, so the levels are spent in STEPS instead. `duelCardStats` therefore takes its base at **Lv1 with merge levels** (the ⟡ track still counts) and adds `duelRankUp` — never both, or the smooth curve and the steps double-count and the caps swallow both.
+      - **`DUEL_RANK_TRACKS` says WHAT each step gives and `DUEL_RANK_GAIN` says HOW MUCH**, both per star tier, and together they are the "more dramatic for the rarer ones" requirement: a 1★ collects +1s and finishes near 6/6 for 1 mana; a 7★ gains +3/+3 a step, **two** mana discounts and **three** ability boosts, going from 10/8 @8 to **16/14 @6** with roughly double the battlecry. Retune those two tables, never `DUEL_ATK_MAX`/`DUEL_HP_MAX`, which are only a safety net now.
+      - `duelNextUpgrade` is what the builder shows ("Lv40: 💧 −1 mana cost") — a student should always know what they are working towards. A mana discount can never take a card below **half** its rarity price, or a trained 7★ would cost what a 1★ does.
+      - `duelAbility(card, level)` takes the level so the `pow` steps land on the ability text as well as the maths — pass the level at every call site, and read a board minion's own `m.ab` rather than resolving a fresh unranked one. `duelRefreshBoard` applies a rank crossed MID-duel as a **delta** against what the card was worth when summoned, so it never wipes a War Cry buff or heals damage already taken.
+    - **🎇 Every skill has its own animation** (`DUEL_FX_SHAPES` / `DUEL_FX_BY_KIND` / `duelZoneFx` / `duelFxForKind`, slot `dfx:<shape>:<element|any>:<n>`, `.duel-zonefx` CSS, v1.275.0). A duel is fought on **zones**, not lanes: a battlecry that hits "ALL enemy minions" happens across the whole opposing row at once, which is the wrong shape entirely for the element FX above (those animate a projectile crossing a lane). So the duel has its own authored set on the Card Art tab.
+      - **Two axes, and the split is what keeps the set finite.** The two ELEMENTAL shapes (`sweep`, `strike`) are drawn once per element — a fire wall and a frost wall are different pictures, and that is the whole point. The other eight are drawn **once for everybody**, because healing light is golden whatever the monster is made of. That is ~108 slots instead of ~360.
+      - **`DUEL_FX_BY_KIND` must cover every skill kind** — the 15 in `DUEL_ABILITIES`, the 9 spell kinds and the 5 hero-power kinds. A kind missing from it simply gets no animation, which is deliberate: unlike `TCG_ROLE_MODS` this can never be a crash. Each row also says what it plays OVER (`foe` / `mine` / `target` / `self` / `hero`).
+      - **The dispatch for a minion lives in `duelCommitPlay`, NOT in `duelResolveBattlecry`** — that function returns early for a PASSIVE ability, so dispatching there meant Divine Shield, Poisonous, Lifesteal and Rush never animated at all. A kind with no row falls back to the arrival rune, so every summon shows something.
+      - **The effect must be LONG enough to look at** (v1.276.0). The first pass held every frame for 110ms, which put a four-frame wall of fire on screen for under half a second — the art was gone before anyone could see what it was. Three numbers set the pace and nothing else knows about them: `DUEL_ZONEFX_MS` (base hold), `DUEL_ZONEFX_PEAK` (the brightest frame — always the 2nd, the one every prompt describes as "brightest of the three/four" — is held 2.4× longer, which is what makes an effect read as a MOMENT rather than a flicker) and `DUEL_ZONEFX_FADE`. A shape's own `pace` scales it: the board-wide wall runs slowest (~2.2s) and the arrival rune fastest (~1.0s), because that one fires on nearly every summon. The CSS fallbacks are driven off the SAME computed duration via `--zfx-dur`, so the pace of the mode does not change on the day a shape's art lands.
+      - **The layer lives in `#duelOverlay`, not in the board.** `duelRender()` replaces the whole shell's innerHTML on every action, so an effect parented to a board row or a card is destroyed the moment anything else happens — survivable at 440ms and fatal at 1.6s. It is `position: fixed` over the host's rect, the same reason the screen shake rides the overlay. Because of that an effect can no longer be truncated, which is why `duelAiWait` only holds the rival for `DUEL_AI_FX_WAIT_MAX` (1500ms) rather than the full duration: the wait exists so effects are seen one at a time, not so the board freezes until the last ember fades.
+      - **A partial run never plays** (the pack-frame rule): `duelFxFrames` returns null unless every frame of that shape exists, and everything falls back to a CSS effect tinted from the element's own palette. That is what makes the feature safe to ship before any art exists, and it lets each shape upgrade on its own as its frames land.
+      - Frames chain (each drawn from the one before), stand on nothing (`dfx:` is in `_tcgArtStore`'s knock-out list and `_tcgBgFreeIds`), and each shape declares its own `strict` — the wide curtains fill the frame by design, so checking them strictly would condemn their own outer glow, exactly like the FX `blast` phase.
+      - A spell has no element, so `DUEL_SPELL_ELEMENT` lends it one, and each hero carries `el` for the same reason. `tools/duel-hero-tests.mjs` pins that every hero power both resolves **and** animates.
+    - **🔍 Hover any card to read it in full** (`duelPeek*`, `.duel-peek*` CSS, v1.271.0). A board minion is a thumbnail and a hand card is 122px, so the ability text is clipped. Hovering anything carrying **`data-peek`** — hand, board, or either column of the deck builder — opens the whole card beside it: the art at size, both numbers, the duel ability in full, and the training / merge / rank lines. It shows **only what a duel uses** (v1.273.0): the card's ARENA skill, its arena stat block and its affinity triangle were all removed, because the duel ability is *generated* from the arena skill but never fires it, the duel's numbers are its own 4/4, and `duelHurtMinion` ignores element entirely — four numbers a student cannot act on, printed beside the two they can. See **👁 What a monster does in THIS game** below for where they went. Three things keep it out of the way: it is **`pointer-events: none`** (it is placed right beside a card the student is about to DRAG), it is bound **once on the document** rather than on the shell (`duelRender` replaces the shell's innerHTML on every action), and `duelRender` / `duelRenderBuilder` **hide it** because the element it was pinned to is about to be destroyed. A board minion peeks from its LIVE state (damage taken, War Cry attack, the keywords it is actually carrying); everything else peeks from the card. Touch has no hover, so a **long press** (`DUEL_PEEK_HOLD_MS`) is the peek there, and it swallows the click it would otherwise have turned into — a student holding a card still is reading it, not playing it.
+    - **⚔️ attack and 🛡️ defence carry icons everywhere in the duel** (`duelAtkHtml` / `duelDefHtml`, v1.271.0) — hand, board, builder rows and the peek. They are inline SVG stroked in **`currentColor`**, not emoji: emoji render differently on every phone, and `currentColor` is what lets the shield turn red with `.duel-hp.hurt` instead of needing a second icon. The collection card's own stat pills already had the sword and shield (`TCG_STAT_SVG`) and are untouched.
+    - **The rival brings a DECK, and one of them hard-counters a swarm** (`DUEL_RIVAL_PLANS` / `duelPlanFor` / `duelRivalDeck` / `duelAiWorthPlaying`, v1.271.0). A rival that shuffles a random forty has no plan, and a student who floods the board with cheap minions beats it every time — which is the report this answers. There are three archetypes: **Mixed Company** (the old behaviour), **🌋 Ashfall Legion** (board clears — the counter to going wide) and **🛡️ Bulwark Order** (taunts and healing).
+      - **Both halves are load-bearing and neither works alone.** The deck supplies the clears (`plan.score` prefers `DUEL_AOE_ABILITIES` cards and the sweep spells); `duelAiWorthPlaying` makes the AI **hold** them until they are worth casting — two enemy minions, or one it kills. A sweeper cast into an empty board counters nothing, which is exactly how the rival used to be beaten by simply playing more minions than it could answer. Only cards whose value depends on the board are ever held; a plain minion is always played, and a rival with an **empty board** releases a minion anyway (never a spell) rather than holding a perfect hand while it loses.
+      - **The counter is biased, not random**: `duelPlanFor` re-weights on `duelDeckIsSwarm(duelDeckFor(s))` — half or more of the student's monsters costing ≤ `DUEL_SWARM_COST`. It shows up against a swarm deck far more often and still turns up occasionally against everyone, and a swarm player still meets the other decks. Keep both directions true if you retune the weights; the harness pins them.
+      - It is **announced** — named on the rival's side of the board (`.duel-hero-plan`) and in the opening log line. A student who loses to a board clear and is never told one was coming learns nothing.
+      - `duelRivalDeck` widens the star band by **exactly one star** when the band holds fewer than `DUEL_PLAN_MIN_PREF` of the plan's own cards (every Taunt in the dex is 4★, so a 2★ collection's band has none). A plan with no preferences never widens, so an ordinary rival stays inside the student's band.
+      - Run **`node tools/duel-rival-tests.mjs`** after touching any of it.
+    - **🏆 The Ember Duel board** (`rpgRowDuel` / `rpgRowDuelScore`, tab `duel`, v1.282.0) pays its **top 3** a $10 voucher, ranked on **duel questions × accuracy²** — the All-Time board's rule, through the same `rpgScienceScore`, so accuracy counts twice and the board cannot be climbed by rattling through questions. **Winning duels is worth nothing on it**, which is what keeps the mode free to play: the questions are the rate limit, exactly as `rpgAwardGameQuestion` is the only faucet.
+      - The counters are `rpgState.duelQ` / `duelCorrect`, incremented by `duelNoteQuestion` in `duelAnswer` — the one place a duel question is answered — and counted **whether or not `rpgAwardGameQuestion` paid for it**, because the board ranks on questions done, not points earned.
+      - Adding a prize board means touching all four places or bans and prizes leak: the tab's `rpgBoardMetric` / `rpgBoardValueHtml` / `rpgPrizeBadge` / `rpgRowClass` / `rpgBoardNote`, a `PRIZE_CATEGORY_TAB` entry, a `push()` in `_computePrizeWinners`, and the label in the winners table. The duel is also in the `embers` **ban scope**, since it is part of Realm of Embers.
+      - The tab is **hidden until the mode is released** (`duelAccessAllowed`), the same way Legends' is — no advertising a prize nobody can play for — and `rpgBoardTab` falls back to `month` if it was selected when the mode closed.
+    - **Students choose a HERO** (`DUEL_HEROES` / `duelHero*` / `duelUsePower` in `app.js`, `.duel-heropick*` / `.duel-power` CSS in `index.html`, v1.270.0) — the student is somebody in the duel, not just a life total. A hero wears its own portrait on the board and brings a **hero power**: `DUEL_POWER_COST` (2) mana, **once a turn, all duel long**, never in the deck and never running out. That is what makes two students with the same forty cards play differently.
+      - **The five shipped heroes are the BASIC set and are deliberately WEAK** — one damage, two armour, one +1/+1, one freeze, one card for a life. They are the floor the game is balanced on, they are free to everybody from the first duel, and **`tier: 'basic'` is what leaves room for the LEGENDARY heroes of the next expansion**: a legendary hero is a row with `tier: 'legend'`, a bigger `v` and whatever unlock rule goes in `duelHeroesFor(s)` — the one place availability is decided, so the chooser, the save and the rival picker all obey it without being told three times. The harness pins `v ≤ 2` on the basics for exactly that reason.
+      - **A power's `kind` must be handled in `duelResolvePower`** — the same trap `DUEL_ABILITIES` and `TCG_ROLE_MODS` carry, except that this one fails SILENTLY: an unhandled kind is a button that costs two mana and does nothing. `tools/duel-hero-tests.mjs` fires every hero's power and fails if the board did not change.
+      - **A power with a `need` reuses the SPELL targeter wholesale** (`DUEL_TARGETED`'s vocabulary): it arms `r.pending` with `power: true` and the same `duelTap` branch resolves it, so a targeted hero power costs no new interaction code. `duelCanUsePower` asks the same three questions `duelCanPlay` does — enough mana, not already spent, something legal to aim at.
+      - **The default is the SAFEST hero, not the first row.** `DUEL_HERO_DEFAULT` is the Warden, and `duelHeroId` falls back to it for a student who has never chosen AND for a hero id that has since been retired. Her power is **armour**, which is the point: `duelHurtHero` spends armour before life, so it never overheals, never expires, can be laid down before the blow instead of after, and — unlike every other power — cannot be mis-aimed or pressed into an empty board. `s.duel.hero` is left **null** until a real choice is made, so `duelHeroChosen` can tell "picked the safe one" from "never looked" and say so; the duel plays the same either way.
+      - Portraits are the ordinary art pipeline under **`hero:<id>`** — paste / drop / upload / ✨ AI on the Card Art tab plus a draw-all batch (`tcgHeroArtPrompt` / `_tcgGenHeroArt` / `tcgHeroArtAdminHtml`). A hero **stands on nothing**, so `hero:` is in `_tcgArtStore`'s knock-out list, `_tcgStrictBg` and `_tcgBgFreeIds`, and each row names its own chroma `screen` — a colour that hero cannot be wearing. Same no-lettering rule as every other slot.
+      - The rival gets a hero too (`duelRivalHero` — a basic one at random, never the student's own) and spends it in `duelAiTurn` **after** its hand, because a card on the board beats two armour.
+    - **Students build their own deck** (`duelOpenBuilder` / `duelDraft*`, v1.263.0), Hearthstone's rules and for Hearthstone's reasons: exactly `DUEL_DECK_SIZE` (**40** since v1.266.0) cards, at most `DUEL_COPIES_MAX` (2) of any monster and only **one** of a 7★ legend (`duelMaxCopies`). The limits are the one place a collection turns into a decision. The deck is saved on `tcgState().duel.deck` and **filtered inside `tcgHydrateState` against both the dex and what is still owned**, exactly as `team` is — a sold or merged-away card can never poison a saved deck. `duelDeckFor(s)` returns the saved deck only if `duelDeckProblem` says it is still legal, and auto-builds otherwise, so a student who has never opened the builder still gets a playable duel. **`duelBuildDeck` must obey the same copy limits** — it did not at first, and "✨ Suggest a deck" produced a deck the builder then refused to save.
+      - **`DUEL_COPIES_SPELL` (4) is what makes the deck size REACHABLE, and it is not a balance knob.** Spells are the free basic set — everybody has all `DUEL_SPELLS.length` (12) of them whatever they own — so a student holding N different monsters can build at most `2N + 12 × DUEL_COPIES_SPELL` cards. At two copies of a spell that ceiling is `2N + 24`, which means anyone under **eight** distinct cards could not legally fill forty and the builder would refuse every deck they made, while `duelDeckFor` quietly dealt them a short one. Four puts the ceiling at `2N + 48` — over the line from the very first pack. **Raising `DUEL_DECK_SIZE` again means re-checking that arithmetic**, and the tiny-collection cases (1 / 2 / 3 / 8 owned) in the duel harness are exactly that check.
+      - The auto-builder and the rival both size their spell count from `DUEL_AUTO_SPELLS` (a quarter of the deck) rather than a hard-coded 5 or 6, so the deck's *shape* survives a change to the size instead of turning into forty monsters and no answers.
+      - **Five deck SLOTS** (`DUEL_DECKS_MAX`, `duelDecks` / `duelActiveIndex` / `duelActiveDeck` / `_duelStoreDecks`, v1.267.0). `tcgState().duel.decks` is an array of `{ name, cards }` and `duel.active` says which one is played; the builder edits one slot at a time (`duelDraft.slot`) and every surface reads the ACTIVE deck, never `duel.deck`. One deck was enough while every duel was the same fight — it is not, now that rank, element and the rival's own average rarity pull a deck three ways, and rebuilding forty cards to try an idea is a chore rather than a decision.
+        - **`duel.deck` still exists and is written on every save** as a mirror of the active slot. It is never read once `decks` exists; it is there so that rolling the app back to a build from before slots finds a student's deck where it used to be instead of an empty builder. `_duelHydrateDecks` migrates it into slot 1 when `decks` is absent — and because `tcgHydrateState` is a WHITELIST, both fields have to stay in that literal or they are deleted on the next load.
+        - Saving a slot also makes it active (a student who has just built a deck expects to duel with it), `duelDraftDirty` compares as a MULTISET so a re-sorted list of the same forty cards is not "unsaved changes", and `duelDeckPickHtml` puts a one-tap switcher on the Game Modes card — but only once there are two playable decks, since one deck needs no picker.
+      - **A deck that is no longer legal is not thrown away.** `duelDraftSeed(s)` opens the builder on every pick that still stands — dropping only unowned cards and copies over the limit — so a student whose 20-card deck predates the change fills in twenty more rather than starting again. `duelDeckFor` still auto-builds for PLAY, since a duel cannot be dealt from a short deck.
+    - **A duel pays nothing for winning** — `rpgAwardGameQuestion` inside `duelAnswer` is the only faucet, one question a turn, exactly like the Ghost Arena rule. It costs no game credit, so questions are the rate limit.
+    - **Sound and the screen shake are sized by the DAMAGE** (`duelSfx*` / `duelQuake` in `app.js`, `.duel-quake-1…4` CSS in `index.html`, v1.268.0). `DUEL_HIT_TIERS` is the whole "the bigger the blow, the more dramatic" rule in one table: four tiers by damage (≤2 / ≤5 / ≤9 / 10+), each louder, deeper, longer and shaking harder than the one below. `DUEL_HEAL_TIERS` is the same idea for healing — a chord that opens upward rather than anything percussive. **Retune the tables, never the call sites**, and keep the ladder monotonic; `tools/duel-sfx-tests.mjs` pins exactly that, because nobody hears a regression in a number.
+      - **`DUEL_CUES` is everything that is not a blow** (v1.269.0) — drawing a card, summoning, casting, freeze / ward / buff / rank-up, the turn chime, the science question, winning and losing. They are **deliberately quieter than the lightest impact**, and that is not a taste call: a draw happens every single turn and an impact does not, so anything routine at fighting volume is what makes a student mute the whole mode. The harness pins it. Repeats of one cue in a single moment are staggered by `gap` (three opening draws are a riffle, not one click) and dropped past `defer`. Only the STUDENT's draws are heard — the rival's hand is face down, so a sound for it is noise carrying no information.
+      - **A freeze that also CHIPS is both** — `duelHurtMinion` tags that damage `freeze`, not `dmg`, so the flush has to feed it to the impact as well or Ariselle's board-wide hit lands in silence and never shakes anything.
+      - **Adding a cue is a row in `DUEL_CUES` plus a synth kind in `DUEL_SYNTHS`.** The five kinds are `hit` (noise crack + falling body + sub), `chord` (partials opening upward — healing, a ward, a rank-up, a won duel), `swish` (band-passed noise sweeping — anything that MOVES rather than lands; up reads as setting off, down as arriving), `tone` (one voice gliding) and `slay`. A tier naming a kind that is not there falls to `hit` rather than going silent, because a missing sound is far harder to notice than a wrong one.
+      - **Two layers, and the second is why the mode is never silent.** `assets/sfx/duel/manifest.json` names a file (or a full URL) per cue — real recorded effects from a free sound library, fetched ONCE per page. If it is not deployed, or a file fails to decode, that cue falls through to the **WebAudio synth** and is never asked for again. The synth is the shipped default and adds not one byte, which matters as much here as the load-bearing font/Tailwind rules above: the alternative is nineteen MP3s over a school network. `assets/sfx/duel/README.md` names the licences that are safe to use and what each cue should sound like.
+      - **Damage and healing hang off the effect QUEUE, not the rules.** `duelSfxFlush(q, lunged)` is called from `duelFlushFx`, so every path — attacks, spells, battlecries, the AI's whole turn — gets sound and shake for free, in step with the animation it belongs to. (The `DUEL_CUES` one-shots are the exception and play where the event happens — a draw has no queue entry to ride.) It plays **one beat per flush, sized by the loudest thing in it**: a battlecry hitting five minions is one big blow, not five overlapping ones that clip. A flush containing a lunge delays its impact by `DUEL_HIT_DELAY` so the blow lands as the attacker arrives, and a hit on the student's OWN hero is tiered as 2 damage more than it is — it is the one that can end the duel.
+      - The shake rides `#duelOverlay`, not the shell, so the backdrop moves with the board and a shake started mid-turn survives `duelRender()` replacing the shell's innerHTML. **Muting is not the same as reducing motion**: the 🔊 switch (`duelToggleSfx`, remembered in `localStorage` under `sq_duel_sfx`) silences the audio and leaves the shake, while `prefers-reduced-motion` kills the shake outright — it is the one effect that moves the whole screen, so it is removed rather than sped up.
+  - **Announcing a new SET** (`#tcgExpAnnounce` + `TCG_NEWS_VERSION` / `tcgExpAnnounceVisible` / `_commTcgExpansionPost`, v1.259.0) is a different piece of news from the game's RELEASE, and needs its own dismissal key: the release banner is keyed to `releasedAt`, so a student who dismissed it never meets it again — right for "the game exists", useless for "there is a new set in the packs". **Bump `TCG_NEWS_VERSION` and the whole roster meets the new announcement once**, on their next visit. Three banners now share the one fixed slot at the top of the screen, newest first — expansion → release → Science Strike — and each asks the ones above it whether the slot is free (`tcgAnnounceVisible` returns false while the expansion banner is up; `fpsShowAnnounce` checks both). The same news is pinned to the community feed with nothing to dismiss. All of it is gated on `tcgReleased()`, so **nothing shows to students while the game is in beta**.
+  - **🔱 Artifacts LEVEL from repeat copies** (`TCG_ARTI_*` / `tcgArtiPow` / `tcgArtiAbsorb`, v1.281.0) — a spare artifact used to be dead weight, the count going up and nothing else. It now mirrors the card merge track exactly: `s.artiLevels[id]` is 1–99, a repeat is worth `tcgArtiGain(stars)` levels (the merge table, so a 7★ myth is 8 a copy), and `tcgHydrateState` seeds it from the copies already owned so nobody's collection is wasted. It is a **whitelist**, so `artiLevels` has to stay in that literal.
+    - **`pow` means four different things and only one of them simply scales.** `tcgArtiPow(art, level)` is the single door: a percentage grows by `TCG_ARTI_STEP` per level under a per-kind `TCG_ARTI_CAP`; `ward` is an immunity and does not scale at all; **`battery` is a COUNTDOWN** (`skillThresh`, lower is better) so levelling pushes it DOWN to a floor of 1, and scaling it the ordinary way would have made the artifact worse the more copies a student fed it; and `ember` grows only the part of its multiplier **above ×2**, because ×2 is what everybody gets and only the excess is the artifact's own. `tools/artifact-level-tests.mjs` pins each of those, and that every plain artifact climbs at every single level without more than roughly doubling.
+    - **The level is passed INTO `_tcgApplyArtifact`, never read from the save inside it** — that same function equips the OPPONENT's artifact onto their team, so reading the local student's level would hand it to them. The board publishes `tcg.artiLvl` beside `tcg.artifact`; a payload from before this existed carries none and falls back to Lv1, which is exactly what those artifacts were worth when it was written.
+    - `tcgArtiBlurb(art, level)` substitutes the current numbers into the artifact's own sentence rather than rewriting it, so the 🔱 chooser, the reveal card and the battle badge all show what the artifact does **now**.
+  - **Artifact artwork** (`arti:<id>`, `tcgArtifactArtPrompt` / `TCG_ARTI_TIER` / `TCG_ARTI_LOOK`, v1.258.0) — the 30 artifacts had no pictures at all, so a 7★ Wyrmheart Ruby looked exactly as special as a 1★ Iron Pin. They now use the same slot machinery as everything else (paste / drop / upload / ✨ AI on the Card Art tab, plus a draw-all batch), and the picture shows on the pack **reveal card** and in the **🔱 Artifacts chooser** — but never on a LOCKED one, because the art is part of the reward.
+    - **How epic the art is comes from the STAR RATING, and `TCG_ARTI_TIER` is the only thing that scales.** 1★ is a plain worn trinket with no glow at all; 7★ is a world-shaping myth with reality cracking around it. The whole set is looked at side by side, so the ladder has to be legible without reading a word — keep the tiers far apart and never let a low tier borrow a high tier's language.
+    - `TCG_ARTI_LOOK` says what each object physically IS, because the rows carry only a name, an emoji and what the artifact DOES — none of which tells an image model what to draw ("Sun Chip" could be anything). An artifact **stands on nothing** (it sits on a card), so `arti:` is in `_tcgArtStore`'s knock-out list, `_tcgStrictBg` and `_tcgBgFreeIds`, and it is drawn through `_tcgGenClean` with the strict check on a chroma screen picked per artifact (`TCG_ARTI_SCREEN` — green for the red/pink/fiery ones, blue for the green ones, magenta otherwise).
+  - **The realm's LOGO** (`TCG_LOGO_SLOT` = `logo:realm`, `tcgLogoPrompt` / `tcgApplyLogo`, v1.255.0) is one elegant medieval crest built around a **living ember** — drawn on the Card Art tab like everything else, and worn on the **page header** (`#tcgLogoMark`) and the **sidebar door** (`#navTcgIco`), both of which fall back to the 🃏 emoji until one exists. It is not a set banner: a banner sells what is in the packet, the logo is the realm's signature and has to read at 22px. Two rules follow from that and are shared with the rest of the art stack rather than restated — it **stands on nothing** (`logo:` is in `_tcgArtStore`'s knock-out list, `_tcgStrictBg` and `_tcgBgFreeIds`, and it is generated through `_tcgGenClean` with the STRICT check, because it sits over the galaxy), and it carries **no lettering** (an image model asked for a name returns gibberish; "Realm of Embers" is set in Cinzel beside the mark).
+  - **The Chronicle of Embers — the lore** (`TCG_LORE_SAGAS` / `tcgLore*` in `app.js`, `.tcg-lore-*` / `.lore-book*` CSS + `#tcgLoreBook` in `index.html`, v1.254.0) is the 📜 Lore tab: an illustrated **picture book** of the realm, read one page at a time in a full-screen reader (← → turn, Esc closes). Free to read for everyone; only an admin can draw the pictures.
+    - **It is built to GROW.** A card set gets a BOOK (a saga) and a book is only a list of chapters, so shipping an expansion means **appending one entry to `TCG_LORE_SAGAS`** — the tab, the reader, the page numbering, the Card Art slots and the guide's page count all follow. A set with no book yet is billed on the tab as *being written* (`TCG_LORE_NEXT` + the `tcgLoreSagaFor` sweep) rather than going unmentioned, and the last page of the newest book is deliberately an open door.
+    - **A book does not have to belong to a set.** Book Three (*The Dragon Accord*, v1.257.0 — the war and the alliances between the elder gods of the original dex and the Lionheart Legion) carries **`set: null`**, because its whole subject is the two sets meeting. That is what keeps `tcgLoreSagaFor` honest: it only matches a saga that actually claims a set, so a crossover book and an expansion book sit side by side without either being mistaken for the other's story, and the "waiting for their chapter" sweep still reports correctly. Every **7★, 6★ and 5★ card in the dex now has at least one page** — check that again after adding a set.
+    - **Lore text is escaped, so it is PLAIN text.** No markdown: `*emphasis*` renders as literal asterisks on the page. Use the wording, or quotation marks for a spoken line. `<b>` is only available in the tab's own copy (`tcgLoreHtml`), never inside a chapter's `text`.
+    - **The cast is the TOP of the dex, on purpose** — the 7★ legends carry the spine, the 6★ elders carry the chapters, the 5★ cards fill them out — so anything rare a student pulls has a page they can go and read. A chapter names its cast **by card NAME, not id** (`tcgLoreCards` resolves through a name index): the ids are positional and a chapter should read as prose in the source. An unknown name is dropped with a `console.warn`, never thrown — a typo in a story must not take the tab down.
+    - **The illustration is drawn FROM the starring cards' own card art** (`_tcgLoreRefSheet` → the shared `_tcgRefSheet(cards)`, which `_tcgSetRefSheet` also uses), so the hero of a page is unmistakably the card in the student's collection. Slot `lore:<sagaKey>:<chapterId>` in the ordinary art store — paste / drop / upload / ✨ AI, listed on the Card Art tab by `tcgLoreArtAdminHtml` — plus a "draw all missing" batch on the tab itself. A lore plate is a SCENE, so it keeps its background (no `_stripImageBackground`) and gets the big `maxSide` (768) alongside `set:`.
+    - `tcgLoreArtPrompt` asks for a **children's picture-book illustration** — painterly, 16:9, and with the same absolute no-lettering rule the set banner has, because an image model asked for a title returns gibberish. The page title is set in Cinzel over it in the app.
+  - **The realm has its own THEME** (`body.realm-embers`, v1.254.0). Opening Realm of Embers swaps the portal's white theme for gold-on-galaxy across the whole screen, sidebar included; leaving puts it back. `navigateTo` toggles ONE class and everything else is CSS — which is what makes the swap instant and impossible to leave half-applied.
+    - The mechanism is the **design tokens**, not a forked component set: redefining `--surface` / `--border` / `--text` / `--primary` inside `#page-tcg` re-skins every `.tcg-*` surface that was already using them, and only the few rules that hardcode a colour (the page header, the active tab, `.btn-primary`'s white label) are named explicitly. Keep it that way — a themed copy of a component is a component that will drift.
+    - The galaxy and its starfield are `body.realm-embers::before` / `::after`, both `position: fixed` and `pointer-events: none`, so they never scroll, reflow or swallow a click; `.main-content` takes `z-index: 1` to sit over them. Both honour `prefers-reduced-motion`.
+    - **The nav item is the DOOR**, so it deliberately does not look like the other nav items: gold border, galaxy-blue slab, and a tiling starfield (`#navTcg::before`, `background-size` per layer — a handful of gradients make a FIELD rather than seven lonely dots) that brightens and drifts on hover. For a **student** the whole wrap is moved to sit directly under 🏛️ Community by `_tcgPlaceNavItem()`, where they will actually find it; for an admin it stays among the game tools. `#navTcgHome` is the empty anchor it is put back to if the role changes (an admin previewing as a student and back).
+  - **Realm of Embers rulebook** — the 📘 How to Play tab (`tcgGuideHtml`) is meant to document EVERY mechanic. It reads its numbers out of the game's own constants (`TCG_PACKS`, `TCG_SKILLS`, `TCG_AFFINITY`, `TCG_ARTIFACTS`, `TCG_LVL_STEP`, `TCG_MERGE_GAIN`, `GAME_Q_POINTS*`, `EMS_*`) instead of hard-coding them, so tuning a pack or a skill updates the guide too — keep it that way, and add a section whenever you add a mechanic.
+- **Science Quest SVG artwork (v1.385.0).** The owner retired pre-generated avatar/items and requested elaborate SVG artwork for the full catalogue. All 143 equipment items, base/evolved pets and both hero genders now render as SVG for every account. The generated-art beta panel is removed. Do not restore the old beta or raster priorities.
+  - `rpg-svg-art.js` exposes `RpgSvgArt.item(it,{stage})` and explicit profiles for all stable item IDs. It returns self-contained vector fragments in the existing item coordinates. `rpg-hero-svg.js` exposes `RpgHeroSvg.lower/arms/head/grip`. Load both deferred scripts before `app.js`; neither requires network artwork or an AI service.
+  - `rpgItemArt` and `rpgItemIconSvg` are the shared equipped/inventory/loot renderers. Every pet stage uses SVG, with existing evolution names and statistics. Saved uploads and legacy bundled files remain stored but are no longer used to draw these surfaces. The art-management page previews the active collection without offering ineffective image replacement controls.
+  - **Keep the equipment landmarks:** head (100,78), radius 34; shield hand (58,158); weapon hand (142,158). Preserve each item's own box, including wide accessories and the right-side pocket dragon. Layer back accessory → lower body → armour → arms → head → helmet → front accessory → pet → shield → animated weapon/grip. Gender belongs to the rendered hero, including remote leaderboard and arena rows.
+  - Gradients are self-contained and namespaced for each render. Repeated icons and avatars must not create duplicate SVG IDs or depend on definitions in another avatar. Keep template caches bounded and avoid external image references, heavy filters or incidental perpetual motion.
+  - Spire's 11 characters, 20 card illustrations and cast/projectile effects are shared through `spire-svg-art.js` (`SpireSvgArt`). Its game page, portal Spellbook and art catalogue must use the same collection. Character animation classes and reduced-motion behavior remain supported. Artwork changes must preserve endless progression, card ownership, question policies and play credits.
+  - Run `node tools/rpg-avatar-art-tests.mjs`, the `tools/rpg-*-tests.mjs` and `tools/game-spire-*-tests.mjs` suites, plus `tools/rpg-svg-browser.mjs` and `tools/game-spire-adventure-browser.mjs`. Inspect equipped heroes and catalogue sheets at desktop and phone sizes. The non-TCG CI workflow runs these checks and retains screenshots.
+- `mistakes.html` — **"Try again"**, the worksheet a student's own mistakes come back as. Standalone,
+  like `bar-model.html` and `fps.html`: it does NOT load `app.js` and it is not a page inside the
+  portal. The Scan app (`polymathlc/scan`) keeps every question a student got wrong on a photographed
+  paper, and when they choose some it writes ONE document to **`scanPapers/{id}`** and emails a link
+  to this page.
+  - **It lives here because this repo already owns the two things it needs** — the printed-worksheet
+    look, and an image model that can clean a photographed figure up. That app keeps the
+    photographs, so it does the cropping; this does the rendering and the clean-up.
+  - **IT MUST NEVER DISTURB THIS APP, and that is the whole reason it is a separate file.** It reads
+    and writes exactly two things: the `scanPapers` document named in `?p=`, and pictures under
+    **`scan-mistakes/`** in Storage. It never touches the question bank, the vetting list, the
+    teaching notes, a hero, a leaderboard or a student's progress — a scanned question must not
+    appear anywhere in this app's own content. The Scan app's collections are namespaced away from
+    this one's (`scanMistakes`, never `mistakes`, which is THIS app's own log under the same uid),
+    and this page keeps that contract from the other side.
+  - **BEST OF THREE TIERS, and `tierOf(it)` is the ONE place a question's is decided** (scan
+    v1.18.0, this file v1.3.0): the question **set out again in blocks**, then the **whole-question
+    crop**, then the flat transcription. The Scan app now reads the printed question off the
+    photograph into ordered blocks — the wording as text with an `image` block wherever a figure
+    belongs, each figure cropped from the page — the way this app's own ⚡ Rapid add builds a
+    question, so it comes back TYPESET with the paper's own diagrams still in it: sharp at any size,
+    and readable on a phone in a way a photograph of 9pt print never is.
+    - **The blocks are RE-VALIDATED here, never trusted from the document** (`questionBlocks`). The
+      paper is written by another app, in another repository, at whatever version it happened to
+      be, and a block that will not draw is a thing to find out now rather than on the printed
+      page. A build with **no wording in it** is refused outright — a question made of pictures
+      asking nothing is worse than the two tiers under it.
+    - **A built question prints its MCQ options as usual**, because the Scan app deliberately
+      leaves them out of the blocks: it already holds them, and a second copy inside the wording is
+      the choices offered twice. It also gets the FULL working box — a typeset question brings none
+      of the paper's own ruled space with it, which is exactly why the whole-question crop gets the
+      short one.
+    - **A block figure that will not load takes itself off the page** (`__blkFailed`), the opposite
+      of `__figFailed` below: the wording is typeset above and below it and still does the asking.
+    - **`pictureSlots` decides WHICH pictures are cleaned, and it asks `tierOf` too.** A question
+      shown in blocks never shows its whole-question crop, so cleaning that crop would be an image
+      call, a Storage write and a student's data spent on something nobody will ever see. The
+      renderer and the cleaner reading the same function is what stops the page cleaning one
+      picture and printing another. The storage key for a crop is unchanged, so a paper cleaned
+      before blocks existed finds its pictures rather than paying for them twice.
+    - **The note under the buttons is built from the tiers really used.** One sheet can hold all
+      three at once, and "these are cut out of your photographs" printed over a page of typeset
+      questions is the kind of small untruth that makes a student stop reading the note at all.
+  - **THE PICTURE IS USUALLY THE QUESTION ITSELF** (scan v1.17.0, this file v1.2.0). A question
+    rebuilt from a transcription is only as good as the OCR, and a maths or science question is its
+    LAYOUT as much as its words. So the Scan app now crops the WHOLE printed question — number,
+    wording, options, figure, answer space — out of the student's own photograph, and that is what
+    is printed to answer on. `shot` says which of the two a picture is (`'question'` or `'figure'`)
+    and it is never guessed: printed the wrong way round, a question picture has its wording typed
+    out above it as well — the question asked twice — and a figure has no wording at all, which is
+    a diagram with nothing asking anything. **A paper made before that flag existed holds figures**,
+    which is what it defaults to, and those render exactly as they always did.
+  - **A whole-question picture prints NO wording of its own**, so `__figFailed` is not optional:
+    a Storage URL that has expired or a phone with no signal would otherwise leave a numbered
+    question with nothing under it at all. The transcription is still on the item and steps forward
+    when the picture will not load.
+  - **TWO VERSIONS, and the WORDING IS THE SAME IN BOTH.** Only the picture differs: *cleaned up*
+    (the default — redrawn in black and white with the student's own pencil rubbed out, so the
+    question is blank again) or *the original photograph*. Nothing printed is ever reworded: the
+    answers and the key are the transcription the Scan app made and the teacher already marked
+    against, so an image model never gets to rewrite a number in a question — only to redraw it.
+  - **`cleanPrompt(kind)` is ONE body and two subjects.** A figure was cut from inside the page and
+    has no outside to tidy; a whole question is a rectangle off a photograph taken on a desk, so its
+    edges can hold a thumb, a shadow, the corner of the next question. `CLEAN_EDGES` is that extra
+    paragraph, and it says **WHITE** rather than "remove" — a model told to remove something removes
+    it and then draws something else in its place.
+  - **`CLEAN_PROMPT` pulls in two directions on purpose**: remove every handwritten mark, and change
+    nothing that was printed. It says so in both directions, and it says that a mark it cannot
+    classify is KEPT. A model that quietly redrew a printed axis value would be worse than a grey
+    photograph.
+  - **The clean-up is LAZY and cached.** It runs on first view, one figure at a time (these are big
+    calls on a student's phone), and the result is written back onto the paper so every later visit
+    — the teacher's included — is instant. A Storage refusal is not a failure of the clean-up: the
+    picture is already in hand and is shown; it is simply made again next time.
+  - **Every failure shows the ORIGINAL and says so.** No image model in the project, a model that
+    refuses, a fetch that fails — a blank space where a diagram should be is a question nobody can
+    answer.
+  - **The link alone is not enough.** It is a child's marked work, so opening it requires signing in
+    and only the owner or an admin can read it; a paper expires (a year) and the page refuses to
+    render an expired one.
+  - **The printed sheet says to PHOTOGRAPH IT BACK IN** (`.shHow`, and it prints). That is how the
+    Scan app's mistake book empties itself — a question got right twice in a row leaves it — and the
+    loop only closes if the student knows to close it. The instruction is on the paper rather than
+    on the screen because the paper is what they have in front of them when they finish.
+  - Version badge (`APP_VERSION` in the module) is hard-coded — bump on every change to this file.
+- `science-worksheet.html`, `math-worksheet.html`, `math.html` — worksheet builder apps.
+- `fps.html` — "Science Strike" roguelite first-person shooter: pure-canvas open-world FPS — infinite procedural Minecraft-style overworld (blocky grass, dashed road grid, solid trees/rocks, mountain ridges, sun/clouds), infinite scaling enemy waves (Warden boss every 5th), rotating minimap radar with rim-clamped enemy blips, CS-style expanding crosshair + recoil + vertical aim with small ×2 headshot crit zones, 3 classes (Soldier/Sniper/Engineer) each with a 100-node 10-tier prerequisite skill tree (I key, pauses the run, purchases apply instantly; F class actives: Bullet Time/Snare Trap/Auto-Turret), grenades on Q (frag/fire/ice/shock/shrapnel), 12 weapon archetypes (3 scoped ARs + DMR + 4.5× sniper rail with right-click ADS zoom, crossbow, laser beam, plasma) drawn by one drawGunModel() for both the first-person viewmodel and full ground-drop models, real travelling bullets with tracer trails (only tree trunks block shots), 25 enemy types (5 hand-drawn + 20 procedural body-plan variants) each with a per-type headshot crit box, cores banked+saved instantly on earn, Borderlands-style rarity loot drops (Common→Mythic, elemental effects, Mythic specials), and a science MCQ from the shared bank every 15s — correct streaks raise loot luck, milestones guarantee minimum rarities. Shares index.html's Firebase project, Google sign-in, App Check and question bank (`users/{adminUid}/questions`). Leaderboard (ranked by correct answers, top-3 $10 voucher): fps.html PUBLISHES ONLY — it has no board UI of its own. Stats live in a `fps` field on the SAME `scienceGameLeaderboard/{uid}` doc the RPG publishes — index.html's `rpgPublishLeaderboard` MUST keep `{ merge: true }` or it wipes the fps stats (and fps.html's `fpsPublish` likewise). The board renders only inside index.html's Leaderboard page as the "🔫 Strike" tab (`rpgBoardTab === "fps"`, all-time correct answers, `rpgPrizeBadge`/`rpgRowClass` give top 3 the $10 voucher badge); fps.html's menu just links to `index.html#leaderboard`. Release: FULLY RELEASED — no beta gate, no `fpsConfig` flag, no locked screen; every signed-in user gets in and `navFps` shows for everyone (`fpsApplyNavVisibility` still respects the RPG "Hide game" toggle). Release announcement banner in index.html (`#fpsAnnounce`, dismissible via localStorage) plus a built-in pinned community-feed post (`_commFpsAnnouncePost`). Version badge in fps.html (`#versionBadge`) is admin-only and hard-coded — bump on every change to this file.
+- `bar-model.html` — "Bar Model Studio" PSLE maths app: students get a generated (or typed/dictated/photographed) word problem, draw a bar model on an SVG canvas, and submit it for AI marking. Uses the SAME AI marking stack as `index.html`: Firebase AI Logic on the shared `mathgen--app` project, App Check (reCAPTCHA v3), `gemini-3.8-flash` with `thinkingConfig: { thinkingLevel: AI_THINK_MIN }` + JSON response mode, and the tolerant `_parseAIJson`/`_repairAIJson` parser (keep these in sync with `app.js`). Optional admin-only ChatGPT engine (key in localStorage) falls back to Gemini on failure. Its version badge (`#versionBadge`, admin-only) is hard-coded in the HTML — bump it on every change to this file.
+- `pdf-annotator.html` — PDF annotator + keyword-revision app. Admin opens a PDF, writes on it (pen/highlight/text/shapes/arrows), marks keywords inside text boxes with the key tool, and saves it to `pdfAnnotator/{id}` (+ the PDF itself in Storage under `pdf-annotator/`). Students open a saved worksheet, switch on Revise mode and type the keywords from memory. Saved worksheets carry a `slot` (the class they were taught to) alongside `level` and `wsDate`.
+  - **There is NO reward system in this repo.** Awarding marks lives in the Ans Key app (`polymathlc/anskey` → `index.html`), which shares this same `pdfAnnotator` collection. Do not add a Reward button, a students/awards/bosses write, or any other marks path here — it was deliberately moved out in v1.5.0.
+  - `wsMeta.slot` is the only thing left of that link: the free-form class string ("P5 Science — Wednesday 5pm–6.45pm") that the Ans Key Reward window pins a worksheet to. Nothing here edits it; `performSave` just writes back whatever was loaded so the pin survives a save made from this app.
+  - Version badge (`#versionTag`, `APP_VERSION`) is hard-coded — bump on every change to this file.
+
+## 📝 Every part gets its OWN explanation, by default (v1.342.0)
+
+`qPartsWithoutExplanation` / `qSplitMultiPartExplanations` /
+`qEnsurePartExplanations` / `_partExplSection` / `_partExplPrompt` /
+`aiWritePartExplanations` / `PART_EXPL_MAX` (in `app.js`, search
+`EVERY PART GETS ITS OWN EXPLANATION`), plus `_aiBuildFillPartExplanations`,
+the step **2b** in `processRapidJob`, and the `EVERY PART GETS ONE, WITHOUT
+EXCEPTION` clause in `_partsPromptRules()`.
+
+A question with (a), (b), (c) is **THREE questions on the answer key**: each is
+printed under its own heading, each is marked on its own, and each is what a
+pupil is looking at when they read the note underneath it. So each needs its own
+explanation — and a part very often had none.
+
+- **THE PROMPT ASKS, AND A MODEL STILL SKIPS.** `_partsPromptRules()` has asked
+  for one explanation per part since v1.246.0, and it is obeyed most of the time
+  rather than all of it. A page of five questions read in ONE reply — which is
+  every page of a PDF — is exactly where a model economises.
+- **AND THE REPAIR ONLY COVERED ONE SHAPE.** `qScopeExplanations` fixes the
+  single-explanation case: it splits the note per part where the model labelled
+  it and otherwise files it under NO part. **Two explanations for three parts
+  fell straight through its `exs.length !== 1` guard** and part (c) was left
+  bare. The gap is silent in the worst way — the question builds, reads and
+  prints perfectly, and the missing note is met by whoever is standing in front
+  of a class holding the key.
+- **IT IS CLOSED TWICE, AND THE FREE HALF IS ALWAYS FIRST.**
+  `qSplitMultiPartExplanations` takes an explanation holding "(a) … `<br>` (b) …"
+  and makes it the notes it already is. It is **idempotent** (after the split no
+  box holds two markers, so it and `qScopeExplanations` never fight) and it
+  costs nothing, so it runs whether or not the AI is reachable.
+- **`qPartsWithoutExplanation` is the ONE place "missing" is decided**, and it
+  is re-read at APPLY time as well as before the call: a part that gained a note
+  while the call was in flight keeps the one it has. **Nothing already written
+  is ever replaced** — an author's own words, and the model's note for another
+  part, are not this pass's to rewrite. A note filed under `QPART_NONE` counts
+  for **no** part: it is the note about the whole question, and it is not what a
+  pupil reads under (b).
+- **ONE CALL PER QUESTION, NEVER ONE PER PART.** A three-part question short of
+  all three is one call, or a forty-page paper is a hundred and twenty.
+  `PART_EXPL_MAX` caps it: more lettered parts than that is not a question, it
+  is a paper that failed to split.
+- **IT IS THE DEFAULT DEPTH, ALWAYS.** The rule comes from the shared
+  `_explDepthRules(hasAnswer, asksExplain, '')` — the same function the 🤖
+  button reads — so the note is the 2-4 sentences it has always been. **A build
+  path may never reach 📖 or 📚**: a paper of forty lectures is the fault the
+  three depths exist to undo (see 📝 AN EXPLANATION IS NOT THE ANSWER AGAIN).
+- **THE PAGE GOES ALONG.** Both call sites hand over the screenshot / rendered
+  PDF page, so the note is written from the FIGURE rather than from the
+  transcription alone — which is the whole reason the build call was a vision
+  call in the first place.
+- **A FAILURE COSTS NOTHING.** Wrapped at every call site: the question reaches
+  vetting exactly as it would have. An explanation that could not be written is
+  the state we were already in; a question lost because writing one threw is not.
+- Grounded through `aiGrounding('teach', topic)` like every other explanation —
+  the census in `tools/teaching-notes-tests.mjs` reads `_partExplPrompt` one hop
+  from the caller.
+- Run **`node tools/part-explanation-tests.mjs`** after touching any of it.
+
+## 🖼 Draw this explanation — a picture of exactly what it says (v1.342.0)
+
+`XD_FIDELITY` / `_xdPrompt` / `_xdExplText` / `xdRunBlock` / `_xdGoBlock` /
+`xdTouchUpBlock` / `xdRemoveBlockPic` / `setXdBlockNote` / `xdBarHtml` /
+`_explKeyContentHtml` / `_qExplanationDiagrams` (search `DRAW THE EXPLANATION`),
+plus `_diagramDraw`, the `.xd-preview` CSS in `index.html` and the bar under
+every 💡 explanation box.
+
+An explanation is words about something that is nearly always a **picture**:
+where the heat went, which way the light bent, what the plant did with the
+water. A pupil reading *"the water vapour cooled on the cold surface and
+condensed"* has to build that picture in their head before the sentence means
+anything, and the ones who cannot are exactly the ones the note was written for.
+🖼 **Draw this explanation** draws it.
+
+- **IT DRAWS THE EXPLANATION, NOT THE ANSWER.** 🖼 Auto diagram on a 🔑
+  answer-key block draws what the ANSWER is; this draws what the EXPLANATION
+  SAYS — the mechanism, the stages, the arrows. **`XD_FIDELITY` is where that
+  difference is stated**: everything the explanation NAMES appears and is
+  labelled with the explanation's own word for it, every process it describes is
+  visible as a process, and nothing it does not say is invented. Lose it and the
+  button draws a generic picture "about heat" beside a note about something
+  else — which looks like a working feature and teaches the wrong thing.
+- **THE EXPLANATION IS THE BRIEF, so an EMPTY box is refused** before a call is
+  made. A picture drawn from nothing is a picture of nothing, and *exactly what
+  the explanation says* is not a promise that can be kept without one.
+- **`_diagramDraw` IS THE ONE DRAWING CORE.** Every teaching diagram in the app
+  is made there — the answer-key panel, the 🔑 block and this — so the reference
+  picture, the paper clean-up (`_paperCleanDataUrl`) and the upload cannot drift
+  between them. Only the PROMPT differs, and each surface passes its own builder.
+  `AKD_PRINT_RULES` is likewise the ONE style: these print on the same answer key
+  beside each other, and two houses of diagram on one sheet reads as a mistake.
+- **THE PICTURE LIVES IN `block.url`**, exactly where the 🔑 answer-key block
+  keeps its own — so it saves with the question, and ✏️ **Touch up** reaches it
+  through the **SAME `akBlockId` branch** of `applyAnnotTool`. No second editor
+  and no second destination; that branch is "a BLOCK's own picture, by id".
+- **IT IS SHOWN ONLY AFTER MARKING.** `renderImportedBlockStudent` still renders
+  an explanation block as NOTHING inside the question, so a diagram of the
+  answer can never appear above the question that gives it away. The 🖼 **Picture
+  it** card is built in `showExplanation`, the ONE post-marking builder, and
+  **`_qExplanationDiagrams` is its own reader** — kept apart from
+  `_qAnswerDiagrams`, which answers a different question ("what picture explains
+  the ANSWER"). One function answering both is one that will be asked the wrong
+  one.
+- **`_explKeyContentHtml` is the ONE way an explanation reaches a printed key** —
+  its words, and the picture under them — and BOTH print paths plus
+  `_qFallbackKeySection` call it. Those two switches had already drifted over the
+  MCQ answer once; a key carrying the picture from one print button and not the
+  other is that same fault wearing a new hat. The section is pushed on content
+  **OR** url, so an explanation whose whole point is the diagram is not dropped
+  for having few words.
+- **`.xd-preview` is in `EM_KEEP`.** In ✏️ editing mode everything but
+  `.content-editable` folds behind the ⚙, and a picture the author has just
+  drawn disappearing reads as one that has been lost — the same dead-button
+  failure the 🔑 keyword panel had.
+- **THE LABELS ARE THE PART TO CHECK.** An image model letters a perfect beaker
+  "watr vapuor", which is why ✏️ Touch up sits on the same row and every toast
+  says so.
+
+### 📐 How big the picture is drawn (v1.344.0)
+
+`XD_PRINT_MAX_PT` / `xdImgStyle` / `xdSizeStep` / `xdSizeAuto` / `_xdPaintSize`,
+the − / number / + / **Auto** row under the preview, and the shared
+`imgScaleStep` split out of `adjustImgScale`.
+
+An explanation diagram is one picture on one block, so its size is ONE number
+on that block: **`block.scale`** — the SAME field and the same meaning a
+picture block's own +/− control writes. A separate `diagramScale` would be a
+second word for the same thing, and `imgHasScale` / `imgScale` already say what
+"no size chosen" means and already clamp the range.
+
+- **THREE SURFACES DRAW THIS PICTURE and every one of them reads that number
+  through `xdImgStyle`**: the preview in the editor, the 🖼 Picture it card a
+  pupil sees after marking, and the printed answer key. A surface that read it
+  its own way — or did not read it at all — is the fault the shared print
+  helpers exist to prevent: the author sizes the picture in the editor, the key
+  prints it at the old size, and nothing on any screen says so. That is why
+  `_qExplanationDiagrams` hands back `{ url, style }` rather than a bare url.
+- **NO SIZE CHOSEN IS BYTE-FOR-BYTE WHAT IT ALWAYS WAS, on all three.** That is
+  every explanation diagram already in the bank, and a control nobody has
+  touched must not resize a single one of them.
+- **On paper the chosen share scales the HEIGHT CAP with it.** Half the size has
+  to be half the height too, or a tall diagram comes out half as wide and
+  exactly as tall — which is not what anybody means by half. It can only ever
+  come DOWN from `XD_PRINT_MAX_PT`, the cap the key already allowed, so a
+  resized picture is never the thing that breaks a sheet the planner had
+  already measured.
+- **Auto DELETES the field, never sets it to 0.** `imgHasScale` asks whether the
+  field is there at all, so a zero left behind reads as "no size chosen" to one
+  caller and as a real number to the next.
+- **`imgScaleStep` is the ONE stepper**, shared with the picture block's own
+  +/−: written a second time, `+` means 5% on one picture and something else on
+  the next. It steps from the size that is SET, or from what is on screen when
+  none is.
+- **The control patches the preview in place** rather than re-rendering — in
+  ✏️ editing mode a render rebuilds the whole sheet, and a size is nudged
+  several times in a row.
+- **`.xd-size` is in `EM_KEEP` and in `EM_NO_HOIST_IN`.** It is a SIBLING of
+  `.xd-preview`, so without the first it folds behind the very ⚙ nobody
+  pressed; and its − / + / Auto act on what is in the row rather than on the
+  block, so on the rail they read as block actions with the number they change
+  left behind in the folded half.
+- The 280px cap in `.xd-preview img` is the EDITOR's own viewing cap, so a tall
+  diagram cannot push the size row off the screen. It is not what reaches the
+  card or the key.
+- Run **`node tools/part-explanation-tests.mjs`** after touching any of it.
+
+## 📄 A whole PDF in ⚡ Rapid add — every page read as its own screenshot (v1.336.0)
+
+`RAPID_PDF_MAX_PAGES` / `RAPID_PDF_PAR` / `rapidAddFiles` / `_rapidQueuePdf` /
+`_rapidPdfPump` / `_rapidExpandPdf` / `_rapidPageFile` / `_pdfRenderPage`
+(in `app.js`, search `A PDF IS EXPLODED INTO PAGES`), plus `startRapidJob`'s
+turn-away, `processRapidJob`'s `blankOk`, and `_aiQuestionPayloads`.
+**All four portals carry the same block — ship a change to all of them
+together.**
+
+Paste, drop or pick a pile of PDFs on the ⚡ Rapid add pad and every question in
+every one of them lands in Vetting. Each PDF is rendered to page images by
+pdf.js and **each page is queued as an ordinary rapid job** — which is exactly
+what a pasted screenshot is — so the reader, the `box_2d` crop, the pixel
+passes, the batch level, the duplicate warning, the vetting card and the red
+failure card all follow for free.
+
+- **A PDF IS NEVER SENT TO THE MODEL WHOLE**, and both halves of that failure
+  are silent. There is no single page to measure a rectangle on, so **every
+  figure in the paper is quietly lost**; and a whole paper asked for in one
+  reply runs out of room, which does not error — it TRUNCATES, and
+  `_repairAIJson` hands back a perfectly valid-looking reply with the last
+  questions simply not in it. The turn-away lives **inside `startRapidJob`**,
+  not only in the door, so a caller added later cannot bring that read back.
+- **This is NOT the bulk import, and the two must not be merged.**
+  `handleBulkAiFile` is a modal that takes ONE paper at a time and holds the
+  admin in front of a progress card until it is done; this is the pad, which
+  takes a pile of files at once, reads them in the background, and lets the
+  author close the window and carry on. What they share is `_pdfRenderPage`.
+- **`rapidAddFiles` is the ONE DOOR** every route hands its files to — paste,
+  drop, the picker and the camera. A route with a pipeline of its own is a
+  route that drifts, and the drift shows up as "PDFs work when I drop them and
+  not when I paste them".
+- **A PDF copied in Explorer or Finder arrives on the clipboard as a FILE**, so
+  `rapidPaste` reads `kind === 'file'` rather than an image mime type. Matching
+  on `image/` alone makes "paste a pile of PDFs" a paste that silently does
+  nothing at all.
+- **THE BATCH LEVEL IS CAPTURED WHEN THE FILE IS QUEUED** and carried to every
+  page of it. Rendering a forty-page paper takes real time and the pad stays
+  open the whole while, so a level read inside the render loop files the back
+  half of a P3 paper at P4 the moment the author moves the picker on — and both
+  halves look perfectly right on their cards.
+- **ONE PDF IS RENDERED AT A TIME** (`_rapidPdfQueue` / `_rapidPdfPump`): ten
+  papers at once is a canvas per page of all of them, held in memory, on a
+  school Chromebook. **At most `RAPID_PDF_PAR` pages are in flight**, because a
+  page is an AI call and forty at once is a rate limit rather than a fast
+  import — the render loop waits on them, which is also what keeps the
+  questions arriving in the paper's own order.
+- **A PAGE WITH NO QUESTIONS ON IT IS NOT A FAILURE** (`blankOk`). Cover sheets,
+  instruction pages and blank backs are most of what the front of a paper
+  holds, and a red card for each of them is a wall of red that makes the one
+  real red card get clicked past. An empty page is counted and named in the
+  paper's summary instead. **A page that DID fail names its paper and its page**
+  (`job.source`) — "Couldn't read this screenshot" on a forty-page paper leaves
+  the author with nothing to go back to.
+- **`_pdfRenderPage` is the ONE renderer**, shared with the bulk import's
+  `_pdfToPageImages`, so the two cannot drift into producing a different
+  picture from the same PDF. It paints the canvas white first: a PDF page is
+  transparent where nothing is drawn and a JPEG has no alpha, so the paper
+  would otherwise come out black.
+- **EVERY QUESTION ENDS UP WITH A PICTURE, and the page is prepared ONCE**
+  (v1.337.0). A rendered page carries several questions, and a figure printed
+  above two of them belongs to both — so the prompt says in as many words that
+  an entry needing a shared figure repeats the SAME `box_2d` rather than
+  leaving it to the first one. When a question's rectangles all come back
+  unusable it falls back to the WHOLE PAGE, which is one ✂️ crop away from being
+  right; an EMPTY picture block is not an outcome — the question reaches
+  Vetting wearing *Diagram missing* and the only way back is the paper itself.
+  - The first cut of this held the backup off a multi-question page, reasoning
+    that five identical whole-sheet pictures were worse than none. **They are
+    not**, and that is what the reported bug was: a shared chart above Q7(a)
+    and Q7(b) left both with nothing.
+  - The page is cleaned and uploaded **on the first question that needs it**
+    and the URL handed to the rest (`wholePage`, memoised on `_pageBackup`).
+    Five clean-ups of one sheet is five image-model calls for one picture, and
+    five uploads is five copies of it in Storage. On a MULTI-question page it
+    is not cleaned at all — the author is going to crop it anyway.
+  - **`q.diagramWhole` marks it and the vetting card SAYS so.** A whole page in
+    a picture slot looks exactly like a figure somebody has already cropped,
+    which reads as finished work and is approved into the bank uncropped.
+- Run **`node tools/rapid-pdf-tests.mjs`** after touching any of it.
+
+### …and a QUESTION does not stop at the bottom of a page (v1.347.0)
+
+The `continuation` clause in `_aiBuildQuestionPrompt` (opt-in via
+`opts.continuation`), the flag carried through `_aiQuestionPayloads`, the
+`{ added, questions, continuation }` `processRapidJob` now returns, and the
+stitch inside `_rapidExpandPdf`'s `settle()`.
+
+A PSLE question is printed with its stem and its figure on one page and parts
+(b) and (c) over the leaf. Read page by page that came out as **two questions,
+neither of them answerable**: the first missing its last parts, the second with
+no stem and no diagram at all — and both looking like perfectly ordinary
+vetting cards.
+
+- **THE READER IS ASKED, using the SAME flag and the same wording the bulk
+  import has always used.** A page that opens part-way through — before any new
+  question number, with no stem and no figure of its own — comes back as the
+  FIRST entry with `continuation: true`.
+- **IT IS OPT-IN, and page 1 is never asked.** A pasted screenshot and the
+  first page of a paper have no page before them, so asking whether they
+  continue something is asking about a thing that does not exist — and a model
+  asked an impossible question answers it anyway.
+- **A PAGE HOLDING ONLY A TAIL IS NOT AN EMPTY PAGE.** The prompt says so in as
+  many words: the blank-page rule and the continuation rule read straight at
+  each other, and the wrong resolution silently drops those parts.
+- **`continuation` IS PER ENTRY, never inherited from the reply.**
+  `_aiQuestionPayloads` inherits title, topic and category from the whole
+  object on purpose; a whole-reply continuation flag would mark every question
+  on the page as continuing the page before it.
+- **THE STITCH HAPPENS AT SETTLE TIME AND NOWHERE ELSE.** Pages are read
+  `RAPID_PDF_PAR` at a time, so a later page can finish first — `settle()` is
+  the one place that runs strictly in page order, which is what makes "the page
+  before this one" a question that has an answer. A page that FAILED or held
+  nothing clears the carry: neither leaves a question the next page could be
+  carrying on from, and attaching to the page before THAT one grafts two
+  unrelated questions together.
+- **A third page carries on from the MERGED question** (`qs[0] = merged`), or
+  page 3 would be stitched onto the half that has just been merged away.
+- **A PAGE'S WRITES ARE DURABLE BEFORE THE FEEDER CAN DELETE ONE OF THEM.**
+  `processRapidJob` used to fire `saveVettingQuestion` and move on; the stitch
+  deletes the half it merged away, and a write still in flight when that delete
+  lands puts the half straight back on the next sign-in. The writes are started
+  as each question is built (the cards are on screen either way) and awaited
+  before the job resolves. Nothing else awaits that job, so a pasted screenshot
+  is unaffected.
+- The paper's summary line says how many were **🔗 joined back up**, and the
+  count of questions is decremented — two halves are one question.
+- Run **`node tools/question-merge-tests.mjs`** after touching any of it.
+
+### …and a PAGE holds several questions (v1.336.0)
+
+`_aiQuestionPayloads` — the ONE place a build reply becomes the list of
+questions it describes — plus the "HOW MANY QUESTIONS" clause at the top of
+`_aiBuildQuestionPrompt` and the loop in `processRapidJob`. Ported from
+`polymathlc/english`, which is this app's own fork and had it first.
+
+The pad read exactly ONE question out of whatever it was given, which is right
+for a screenshot somebody took of one question and **wrong for a rendered PDF
+page**: a sheet of a paper carries four or five, and four of the five were
+silently thrown away on a page that produced a perfectly good vetting card.
+
+- **The rule is the shared stimulus, not the numbering.** Numbered questions
+  that share nothing are SEPARATE; a diagram, table or instruction line
+  followed by numbered questions about it is still ONE question with lettered
+  parts, because those questions cannot be read without it. The prompt gives
+  the model the test in one line: *if you deleted every other question on the
+  page, would this one still make complete sense?*
+- **The paper's own number is never kept** — no `part`, and not in any block's
+  text. `_epStripNumbering` runs as the guard on a multi-question page.
+- **An entry INHERITS the title / topic / category / tags it does not repeat.**
+  A model told to write them per entry writes them once at the top and stops,
+  and a question landing in vetting untopiced is one an author must open by hand.
+- **Each question is saved as it is built**, not batched at the end: a failure
+  on question 4 must not lose the three that already read perfectly. Each crops
+  from its OWN entry's rectangles, or five questions share the first one's
+  pictures.
+- **The whole-screenshot backup is single-question only.** On a page of five it
+  would give every one of them the same whole-page picture, which is worse than
+  no picture at all.
+- 🤖 **Build from screenshot loads the FIRST and says so** — the editor holds
+  one question, and silently building one of five with nothing on screen to say
+  the other four existed is how they get lost. It hands **that entry**, never
+  the whole reply, to `_autoFillDiagramsFromBoxes`.
+- **A single-question reply is still accepted** (`_aiQuestionPayloads` falls
+  back to the whole object), so a page that really does hold one question comes
+  out exactly as it always did.
+
+## The subject switcher — four apps, one student (v1.291.0)
+
+`SUBJECT_APPS` / `subject*` (in `app.js`, search `THE SUBJECT SWITCHER`), plus
+`#subjectSwitch` and the `.subject-*` CSS in `index.html`. A pill in the
+**top-right of every page** naming the subject you are in; click it and the
+other three are one tap away.
+
+Polymath teaches four subjects through four separate apps, and they share a
+Firebase project and a sign-in and **nothing else** — four banks, four sets of
+progress, four topic lists. A student taught three of them had one bookmark per
+subject on a school Chromebook, and the subject they never bookmarked is the
+one they stopped using.
+
+- **It is a LINK, not a router.** Four `<a href>`s and no JS navigation: each
+  app stays reachable at its own URL exactly as before, nothing here redirects
+  or gates anything, and middle-click / open-in-new-tab behave the way a
+  student expects — which a `location.href =` handler would quietly break.
+- **The URLs are RELATIVE (`../cer/`), and that is load-bearing.** The four are
+  GitHub Pages project sites — `polymathlc.github.io/{math,english,chinese,cer}`
+  — so they are sibling folders on one host, and a relative hop resolves there,
+  on a local checkout with the four repos side by side, and on a custom domain
+  later, without this file ever naming a host. An absolute
+  `https://polymathlc.github.io/…` works perfectly until the centre moves to a
+  domain of its own and then sends every student back to the old one.
+- **Science lives at `../cer/`** — the repo name, not the subject name. The
+  label and the folder differ on purpose; `../science/` is a 404 for the whole
+  school at once and reads as a link somebody forgot to finish.
+- **`SUBJECT_KEY` says which of the four THIS app is**, and it is the ONE line
+  that differs between the repos — everything else in the block is identical in
+  all four, so a fix copies straight across. `subjectCurrent()` falls back to
+  the first entry, so a `SUBJECT_KEY` naming nothing does not throw: it labels
+  this app "Math" and offers a link back to the app you are already in.
+- **The menu is built from `SUBJECT_APPS`**, never written out in `index.html`,
+  so a subject added to that list appears by editing one line per app.
+- **The current subject is shown and marked, never dropped.** A menu that
+  silently omits where you already are leaves a student unable to tell which
+  app they are looking at. It is a `<div>` rather than an `<a>` — a link back to
+  the page you are on reloads the app and loses whatever was half-typed.
+- **It is turned on from `configureSidebarForRole`**, the one function every
+  signed-in path (admin, employee, student) already goes through, rather than
+  from three call sites that could drift. It is hidden until then, or it floats
+  over the login card belonging to nobody.
+- **`z-index: 150` sits in a deliberate gap**: above the sidebar (100) and every
+  sticky `.page-header` (50) so it is always reachable, and below every modal
+  (`.confirm-overlay` and friends start at 200) so a dialog covers it rather
+  than being covered by it.
+- **`.page-header` gives up its right-hand corner** (`padding-right`), because
+  that is where every page keeps its action buttons and the switcher floats
+  over them. It is fixed to the viewport rather than dropped into a header
+  because this app has no global top bar at all — forty-odd pages carry their
+  own `.page-header`, and a page added next month would be the one that quietly
+  had no switcher on it.
+- The CSS is written against the design tokens and nothing else, so the **same
+  block is used in all four apps** and each paints it in its own palette. A
+  themed copy per app is a copy that drifts.
+- Run **`node tools/subject-level-tests.mjs`** after touching any of it.
+
+### 📚 The level a BATCH is filed at (v1.291.0)
+
+`rapidLevel` / `setRapidLevel` / `_rapidApplyLevel` / `_rapidLevelOptions`, and
+the `#rapidLevelWrap` picker above the pad. An author working through a pile of
+screenshots is nearly always working through ONE year's paper, and the AI was
+choosing the topic — and therefore the level — one screenshot at a time with no
+idea which paper it came from. Saying "these are all P5" once is both less work
+and more accurate than correcting forty questions in vetting afterwards.
+
+- **A LEVEL IS NOT A FIELD ON A QUESTION HERE**, and that is the whole design.
+  It is read off the TOPIC (`getTopicLevel`), and every surface that cares — the
+  bank filter, the student-level gate, the topic grid — reads it that way. So
+  stamping `q.level` would write a field nothing in this app looks at, and the
+  question would still be served at whatever level its topic belongs to.
+  Choosing a level instead **narrows the topics the AI may pick from** to that
+  level's, and the level follows from the topic exactly as it always has.
+- **`_aiBuildQuestionPrompt` takes the level as a third argument** and blank —
+  every other caller, including 🤖 Build from screenshot — leaves the prompt
+  byte-for-byte what it was: the whole topic list, chosen from freely.
+- **A level whose topics have all been removed falls back to the full list.**
+  An empty "choose from EXACTLY this list" leaves the model nothing to choose
+  from and it invents a topic instead.
+- **`_rapidApplyLevel` is the guard for a reply that ignored the list**, and it
+  is what makes the promise true. An off-level or unknown topic is snapped into
+  the level and the question is marked **`topicConfidence: 'low'`** — an
+  existing signal that already draws the "⚠ check topic" badge in vetting. The
+  author asked for a level and gets it; the one thing that had to be guessed —
+  WHICH topic within it — is flagged for the glance it deserves.
+- **A RETIRED topic is never a snap target.** Cell Systems has left the
+  syllabus and `qInSyllabus` keeps it out of every practice mode and every
+  game, so filing a brand-new question into it would write one no student can
+  ever be served — worse than an off-level topic and just as invisible. It is
+  filtered inside `_rapidApplyLevel` rather than out of `currentTopicsByLevel`,
+  because the authoring dropdown must still offer it for the PSLE papers that
+  use it.
+- **A SECONDARY topic counts too.** `qLevelNum` takes the MAX over both, so a
+  `topic2` from a higher level puts the question above the level the author
+  chose while the primary topic looks perfectly right.
+- **The level is captured in `startRapidJob`, synchronously, as the file is
+  queued** — never read inside the job. `_rapidPrepFile` re-encodes a phone
+  photo, which takes real time, and the pad stays open the whole while: an
+  author who queues a P3 paper and switches the picker for the next one must
+  not have the first paper land at P4 because its prep finished second. It is
+  carried on the job (and shown on its vetting card) and applied to **every**
+  question the page held — a page of five is five questions at that level.
+- **It lives in `sessionStorage`**, which is the honest lifetime: a batch is one
+  sitting, so it survives a reload mid-pile and is back to "Any level" in a new
+  tab or tomorrow. A level that persisted for a week would be the one an author
+  set last Tuesday and never noticed again, filing a P3 paper as P5.
+- **The options are generated from `TOPIC_LEVELS`**, never typed into
+  `index.html`: a level added to the topics and missing from the picker is a
+  level nobody can file at.
+- The chosen level is **named back in the toast and the status line**. Filing at
+  a level and never confirming it is how a whole pile ends up at the wrong one.
+- Run **`node tools/subject-level-tests.mjs`** after touching any of it.
+
+
+### The label is drawn from the BLOCK, so it must not also be in the TEXT (v1.293.1)
+
+`qStripOwnPartMarker` / `qPartBodyHtml` / `_qPartOwnMarker` (in `app.js`, search
+`THE LABEL IS DRAWN FROM THE BLOCK`).
+
+A block that opens part (a) already wears its label — the chip in the editor,
+the tag beside the question on screen, the marker in the margin on paper. When
+the SAME marker is also typed at the front of its content the question reads
+**"(a) (a) 文中形容…"** on every surface at once.
+
+- **It came in from the AI paths.** The model is asked to letter the
+  sub-questions and answers by BOTH stamping `"part":"a"` and writing "(a)"
+  into the wording — and `qLiftPartMarkers`, whose whole job is to move a typed
+  marker into the field, opened with `if (qBlockOpensPart(b)) return;`. The one
+  case it could not fix was the one case that needed fixing.
+- **It is handled at BOTH ends, and both are needed.**
+  `qStripOwnPartMarker` takes it out of the BLOCK (from `qLiftPartMarkers`, from
+  `setBlockPart` when an author labels one by hand, and on `editQuestion` so a
+  question tidies itself the moment somebody opens it), and **`qPartBodyHtml`
+  takes it out at RENDER** — the bank is already full of questions written the
+  other way and nobody will open them one at a time. The render side never
+  touches the block, so an author still sees exactly what is stored.
+- **The marker must name the block's OWN part.** A block labelled (b) whose
+  text opens "(a)" is two people disagreeing about which question this is, and
+  that is for a human to look at — not something to tidy away silently.
+- **`_qPartOwnMarkerRe` accepts FULL-WIDTH brackets and `QPART_MARKER_RE`
+  deliberately does not.** That regex has to find a part in text nobody has
+  labelled, where being wrong files a question under the wrong letter; here the
+  block already says it is part (a), so a leading `（a）` can only be the same
+  label twice. It also drops the `(?=\s|$)` guard **for the bracketed forms
+  only**: a 华文 paper writes `（a）文中形容……` with the character hard against
+  the bracket, so demanding whitespace there matched none of them. The two BARE
+  forms keep it, or `a.` would eat the front of any sentence opening with a
+  lone letter.
+- **Two markers in one box is refused**, the same guard the Doctor's scan and
+  `autoNumberParts` use: that is several parts written into one box, or an
+  options list, and neither is fixed by removing the first.
+- A **NUMBERED** part is left alone — detection is letters only, on purpose.
+- `qPartDetect` now takes an optional regex; its default is byte-for-byte
+  `QPART_MARKER_RE`, so nothing else about detection moved.
+- Run **`node tools/part-marker-tests.mjs`** after touching any of it.
+
+## Clearing the vetting list — deleting several at once (v1.292.0)
+
+`_vetSelected` / `_vetVisibleQuestions` / `_vetDeleteMany` (in `app.js`, search
+`DELETING SEVERAL VETTING QUESTIONS AT ONCE`), plus the tick box on every
+vetting card, the `#vetBulkBar` above the grid and **🗑 Delete all** beside
+✨ AI Auto-Vet All.
+
+The vetting list is where a whole BAD BATCH lands — forty screenshots off the
+wrong paper, an import run twice, a set the model made a mess of. Clearing that
+one card at a time is forty confirm dialogs, which is why it gets left instead,
+and a vetting list nobody clears is one nobody reads either.
+
+- **"All" means every card the author can SEE.** `_vetVisibleQuestions` is the
+  ONE place that set is worked out — filtered by the search box, newest first —
+  and the cards, the tick-all box, 🗑 Delete selected and 🗑 Delete all all read
+  it. Deleting questions hidden behind a filter is the one outcome nobody could
+  have predicted from the button they pressed, so the confirm **says which of
+  the two it is doing** and how many are being spared.
+- **The deletes are AWAITED, one document at a time** (`deleteVettingDocAwait`,
+  the awaited twin of the fire-and-forget `deleteVettingDoc`). A batch has to be
+  able to report that four of forty would not go, and a question leaves
+  `vettingList` only once its document really went — the same order every other
+  move in this app uses. A list that has dropped a question the database still
+  holds looks perfectly right until the next sign-in.
+- **The selection is PRUNED on every render** (`_vetPruneSelection`). A ticked
+  question approved into the bank, edited away or auto-vetted out is not a thing
+  to delete; doing it in the renderer rather than in each of those paths is what
+  covers a path added later. "3 selected" outliving the cards it counted is how
+  the wrong question gets deleted.
+- **The ticks live in a `Set` of ids, never as a flag on the question.** Those
+  objects are replaced wholesale by re-reads and cross-tab syncs, which would
+  silently drop the tick.
+- **`.vet-pick` must set `appearance: auto`** — Tailwind's preflight sets it to
+  `none`, which leaves an invisible white square exactly where the control the
+  author is looking for should be. The usual trap.
+- A ticked card's outline **outranks** the duplicate / just-added one while it is
+  ticked and gives it back when unticked: both are inline styles, so one has to
+  win outright rather than being layered.
+- **This delete is FINAL — it does not go through the 🗑 bin.** It is the same
+  `deleteVettingDoc` the single card's 🗑 has always used, and the confirm says
+  so in as many words. A vetting draft that should be kept is approved into the
+  bank, where deleting *is* a move to the bin.
+- Run **`node tools/vetting-bulk-delete-tests.mjs`** after touching any of it.
+
+## 🔗 Merging two questions that are really one (v1.347.0, the bank v1.352.0)
+
+`QMERGE_MAX` / `qMergeUniqueIds` / `qMergeOpenerLetters` / `qMergeLettersOk` /
+`qMergeFixParts` / `qMergeLetterSources` / **`qMergeQuestions`** /
+`qMergePartPreview` (beside the part vocabulary in `app.js`, search
+`TWO QUESTIONS THAT ARE REALLY ONE`), `_vetApplyMerge` / `_bankApplyMerge` /
+`_bankMergeRepointWorksheets` / `deleteQuestionDocAwait` and the `qm*` dialog
+with its `_qmScope` (search `MERGE — two vetting questions`), plus `#qmOverlay`
+and the `.qm-*` CSS in `index.html`, **🔗 Merge selected** in the vetting bulk
+bar and **🔗 Merge these** on the question bank's picked bar.
+
+- **ONE MERGE, THREE CALLERS.** The PDF importer's page-break stitch, 🔗 Merge
+  selected in the vetting list and 🔗 Merge these on the QUESTION BANK all go
+  through `qMergeQuestions`, and the two manual ones share the one `qm*`
+  dialog. A second implementation for a button is a second implementation to
+  get the part order wrong in — and the automatic one is the one nobody
+  watches.
+- **THE ORDER IS THE CALLER'S, and it is never guessed.** Blocks are
+  concatenated in the order the sources are given. The dialog sorts them
+  **oldest first** — which for a paper read page by page is page order —
+  because the vetting list itself is NEWEST first, so taking the order off the
+  screen would put page 2 above page 1 every single time. ▲▼ reorders and ✕
+  drops one out.
+- **BLOCK IDS MUST NOT COLLIDE.** Two questions built in the same millisecond
+  can carry the same ids, and `answerKeywords` and `blanks` are both keyed by
+  one — so a collision silently hands one block another's blanks. Re-keyed on
+  the way in, carrying both maps with it, exactly as ✏️ editing mode does when
+  it loads a sheet (`QMERGE_KW_FIELDS` is `EM_KW_FIELDS` for the same reason:
+  `content` and `text` collapse to the bare id in `kwFieldKey`, so the fields
+  are walked rather than the map).
+- **THE PART LETTERS ARE FIXED ONLY WHEN THEY ARE BROKEN.** (a)(b) + (c)(d)
+  already reads in order and is left **byte for byte** alone. (a)(b) + (a)(b)
+  is not: `qPartMap` opens a second span keyed (a), so the answer key prints
+  two "(a)" headings and anything keyed by part silently keeps one of them.
+  That case, and only that case, is re-lettered in document order — and it is
+  **all or nothing**, because half a re-lettering is a question whose paper and
+  whose answer key disagree.
+- **A RE-LETTERED BLOCK IS STRIPPED FIRST.** A block that opens part (b) may
+  still carry "(b)" in its wording, which `qPartBodyHtml` hides only while it
+  matches its own part. Re-letter it to (c) without stripping and the paper
+  reads "(c) (b) Explain why…". `qStripOwnPartMarker` runs while the OLD letter
+  is still on the block, which is the only moment it can.
+- **THE EXPLANATIONS ARE SCOPED AGAIN.** The parts of a question split over a
+  page break are only all known once both halves are together, so a note
+  written for "the whole question" on page 1 is re-read against all of them —
+  the same call the bulk import makes after appending a continuation.
+- **`opts.letter` is the other intention, and it is OFF by default.** Plain
+  merge means *the second is the REST of the first*, which is the page-break
+  case and must not invent parts. `letter` gives each source its own part, for
+  sub-questions that belong under one stem. A source with no block that may
+  open a part (`QPART_OPENER_TYPES` is text and nothing else) is left to
+  inherit rather than having a picture open a part — that would print a heading
+  on the answer key with nothing marking it on the paper.
+- **THE DIALOG PRINTS THE PART ORDER BEFORE ANYTHING IS WRITTEN**
+  (`qMergePartPreview`). "The parts in the correct order" is a promise nobody
+  can check afterwards without opening the question, and the merge cannot be
+  undone — the other halves are gone.
+- **THE MERGED QUESTION IS WRITTEN BEFORE ANYTHING IS DELETED**, in
+  `_vetApplyMerge` and in `_bankApplyMerge` alike — it is the one thing that
+  may never differ between them, and the harness pins it in BOTH. The other
+  order loses work outright: a delete that succeeds followed by a save that
+  fails takes both halves away for good. `saveVettingQuestion` now returns
+  whether the document really went (the way `saveQuestion` does — every
+  existing caller ignores it), and **a save that did not land deletes nothing**.
+  The worst case is a leftover card whose content is also in the merged
+  question: visible, and one 🗑 from tidy.
+- **THE HOST KEEPS ITS ID**, so the merged question replaces source 1 in place
+  rather than jumping to the top of the list as a new card — and the write is
+  to a document that already exists.
+- **ON THE BANK A SOURCE IS DELETED FOR GOOD, and the dialog says so.** A
+  vetting card is a draft; a bank question is live, and **this app has no bin**
+  — `deleteQuestionDoc` is final. So the bank scope re-words the intro rather
+  than reusing the vetting one, and `bankMergeSelected` refuses a student **in
+  the handler**: it both writes to the bank and deletes from it, and a hidden
+  button is never the lock.
+- **A MERGE SAYS THESE QUESTIONS ARE ONE, so the lists holding their ids follow**
+  (`_bankMergeRepointWorksheets`). A saved worksheet left pointing at a removed
+  source draws its "no longer in the bank" row — a sheet quietly broken by a
+  tidy-up that was never made on it. The host takes the EARLIEST position any
+  of them held (so the teacher's order survives) and the page-break overrides,
+  keyed by question id, move onto the host rather than being left on an id
+  nothing renders. It reaches **this account's own** worksheets and no further,
+  which is why the toast says how many really moved rather than implying every
+  sheet in the centre did. The 🎯 objective side needs nothing: `loQuestions`
+  drops a dead id already, and `qMergeQuestions` unions `los` onto the merged
+  question, so it appears under every objective its halves were filed under.
+- **The bank merge takes the WHOLE selection, not just the visible part.** That
+  is the opposite of 🗑 Delete all's rule and deliberately so: the pick bar's
+  own count is the whole selection, and this dialog then LISTS every question
+  by name with ✕ to drop any — so what is about to happen is on screen, which
+  is the thing a filter-scoped set exists to guarantee.
+- **The meta resolves the CAUTIOUS way**: `topicConfidence` is the least
+  confident of the halves (the ⚠ check topic badge survives), tags and 🎯
+  objectives are unioned, `diagramWhole` / `notInSyllabus` / `annotation`
+  survive if any half had them, two marking guides are joined rather than one
+  thrown away, and `_dupOf` is dropped and re-asked — the suspicion was about a
+  question that no longer exists in this shape.
+- Run **`node tools/question-merge-tests.mjs`** after touching any of it.
+
+## 🧰 Acting on many questions at once (v1.348.0)
+
+`QBULK_*` / `qbulkList` / `qbulkVisible` / `qbulkUnlit` / `qbulkOwned` /
+`qbulkRecency` / `qbulkLightPasses` / `qbulkRenderBar` / `qbulkTallyHtml` /
+`qbulkCheck`, and the 🎯 half — `qbulkTopicChoices` / **`aiPickTopic`** /
+`qbulkTopicsOpen` / `qbulkTopicsRun` / `_qbtWrite` / `qbulkTopicsUndo` (search
+`ACTING ON MANY QUESTIONS AT ONCE`), plus `#qbToolsBar`, `#vetToolsBar`,
+`#qbtOverlay` and the `.qbulk-*` / `.qbt-*` CSS.
+
+Two jobs on the **Question Bank** and the **Vetting List** that are really one:
+🎯 **Re-file topics** and 🚦 **Check questions**. Both have to answer *which
+questions?* first, and getting that wrong is the same fault either way —
+something happens to questions the author cannot see and did not mean to touch.
+
+- **THREE SCOPES, AND EVERY ONE IS NARROWED TO WHAT THE PAGE IS SHOWING**: the
+  ticked ones, the ones added inside a window, everything shown. A search box or
+  a filter is the author saying *these are the ones I am looking at*; acting on
+  a question hidden behind one is the single outcome nobody could have predicted
+  from the button they pressed. It is the rule 🗑 Delete selected already
+  follows, stated once in `qbulkList` for everybody.
+- **The window reuses `AKC_WINDOWS`** rather than listing the same hours again,
+  and is read at CALL time — that const is declared *below* this block.
+- **A VETTING QUESTION IS DATED BY `vettedAt`** (`qbulkRecency`), because that
+  is what its card says. Reading `createdAt` on both pages would make "added in
+  the past hour" mean two different things on two pages that look the same.
+- **The count is on the button and recounted on every render** — the filters
+  change it on every keystroke.
+- **Only what this account OWNS is written** (`qbulkOwned`). Another admin's
+  documents are not ours and Firestore refuses every one, so they are named in
+  front of the author rather than failing forty times.
+- **ONE bar renderer serves both pages.** Two is two places for a change to land
+  on one page and not the other, on surfaces meant to behave alike. It is
+  wrapped in try/catch: `renderQuestionBank` can run while the module is still
+  evaluating, and the consts are in their temporal dead zone until it has
+  finished. `qbulkLightPasses` carries the same guard for the same reason — the
+  two page filters sit far above this block.
+
+### 🚦 The check over a set
+
+- **`tlCheckMany` is the SAME runner** ✏️ editing mode's 🚦 Check all uses: one
+  AI call per question, `TL_PAR` at a time, never paying twice for a verdict
+  that already stands. There is no batch version and never will be — a whole set
+  asked for in one reply truncates, and comes back as findings that cannot be
+  attributed to the question they belong to.
+- **The confirm counts the UNREAD ones**, not the set, so it names what the
+  press will really spend.
+- **The 🔴 🟡 🟢 chips are a FILTER as well as a tally.** Three reds in five
+  hundred questions are unfindable by eye, and being able to act on what the
+  check found is the whole point of running it over a set. `stale` lists under
+  `○ not checked`, because they are the same grey lamp.
+- **THE TALLY COUNTS BEFORE THE CHIP** (`qbulkUnlit`). The chip narrows the page
+  from inside each page's own filter function — that is what makes the grid
+  itself narrow — so a tally that asked after it would leave the bar reading
+  "🔴 3" and nothing else, with no way back to the others.
+- **The vetting list gained lamps of its own**, and with them a `'vet'` scope in
+  `tlQuestionFor` (`_docQById` reads the bank alone, so without it every lamp
+  there would be about a question that cannot be found) and `tlFixVetOptions`
+  for the ＃ one-tap fix — `cqNumberOptions` writes the BANK, and on a vetting
+  question it cannot even find it, so it reports "no options here" about a
+  question that plainly has four.
+- **Both pages need a "hidden by the light" empty state.** Falling through to
+  "Vetting list is empty" reads as the list having been cleared.
+
+### 🎯 Re-filing topics
+
+A pile of P6 questions imported at P3 is not a labelling mistake: **this app has
+no `q.level` field**. A question's level is read off its TOPIC
+(`getTopicLevel`), and every serving surface reads it that way — so a wrongly
+filed paper is *served to the wrong children*, and changing the topics is the
+only thing that puts it right. Re-filing is therefore a TOPIC operation with a
+LEVEL as its constraint, never a stamp on a field: choose the level, and the AI
+picks the closest topic from that level's list for each question — the same
+narrowing ⚡ Rapid add's batch level does at authoring time, applied afterwards.
+
+- **A RETIRED TOPIC IS NEVER A TARGET** (`qbulkTopicChoices`), at any level.
+  `qInSyllabus` keeps Cell Systems out of every practice mode and every game, so
+  filing a question into it writes one no student can ever be served — worse
+  than an off-level topic and just as invisible. A level with nothing live left
+  falls back to the full list rather than handing the model an empty one.
+- **THE SECOND TOPIC COUNTS.** `qLevelNum` takes the MAX over `topic` and
+  `topic2`, so a P6 secondary topic left behind keeps the whole question at P6
+  while the primary looks perfectly right — the re-file silently undone by the
+  field nobody looked at. `_qbtWrite` clears one that is outside the level.
+- **A TOPIC OFF THE LIST IS NOT AN ANSWER.** `aiPickTopic` snaps it into the
+  level and marks it **low**, which draws the ⚠ check topic badge a person
+  already reads — the author asked for a level and gets one, and the thing that
+  had to be guessed is flagged. Same guard `_rapidApplyLevel` uses.
+- **NOTHING IS WRITTEN UNTIL A BUTTON IS PRESSED**, and every row shows where
+  its question is going before it goes.
+- **IT CAN BE UNDONE.** This is the fix FOR a mistake and the fix can be one
+  too, so every question's previous topic, `topic2` and confidence are kept and
+  ↩ Undo puts them all back. A new run REPLACES the last one's stack — two
+  stacked would put the wrong topic back.
+- **A WRITE THAT DID NOT LAND MOVES NOTHING IN MEMORY** (`_bulkTagWrite`'s rule,
+  plus its staleness guard: the run holds references across awaits and the
+  editor's save replaces the bank slot with a rebuilt object).
+- **THE WRITES ARE QUIET** and the run is wrapped in `_wkSuppress` — re-filing
+  forty topics is housekeeping, not forty questions authored, and it must not
+  land in anybody's work-session log. The guard is released in a `finally`.
+- **📌 Set all is the blunt tool and makes NO AI call** — sometimes "all forty of
+  these are Heat" is simply true.
+
+#### 🔬 …and the SECOND topic, when the primary names a skill (v1.349.0)
+
+`QPROCESS_TOPIC_RE` / `qProcessTopic` / `qbulkSecondOk`, the `topic2` clause in
+`aiPickTopic`'s prompt and reply, and `_qbtWrite`'s third argument.
+
+An experiment question is an experiment **about** something. *The Scientific
+Endeavour* and *Measurement and Lab Skills* name the PROCESS of science, not a
+body of it — so a question filed under one of them says how it is being asked
+and nothing at all about what it asks. The heat is in the question and nowhere
+in its filing, so it never turns up under Heat.
+
+- **`topic2` is where that goes, and it already exists.** `qTopicList` reads
+  both, so a second topic makes the question findable, filterable and servable
+  under the science it is really about. Nothing new had to be stored.
+- **THE ONE THING IT MUST NOT DO IS RAISE THE LEVEL.** `qLevelNum` takes the
+  MAX over both topics, so a second topic from a HIGHER year silently puts the
+  question above the level the author just asked for — the re-file undone by
+  the field nobody looked at, from the other direction. A LOWER one is harmless
+  and is exactly the case this is for: an S1 investigation about P4 heat is
+  still an S1 question.
+- **That is why `_qbtWrite`'s clear rule changed** from *"not in the chosen
+  level"* to *"ABOVE the chosen level"*. Strictly more correct, and required —
+  the content topic is very often taught in an earlier year, which is why the
+  second topic is chosen from the WHOLE live list rather than the level's.
+- **`qbulkSecondOk` is the ONE gate** and it asks four things: real and live
+  (an invented topic is filed where nothing can find it, a retired one where no
+  student can be served), not the same as the primary, **not another process
+  topic** (a second skill topic says nothing the first did not), and not above
+  the primary's level.
+- **A QUESTION ALREADY ON THE RIGHT TOPIC STILL GAINS A SECOND ONE.** The
+  reported case is exactly that — the primary was right all along and the
+  science was nowhere in the filing — so counting it as "already right" would
+  leave every one of them untouched. `same` compares both fields.
+- **`_qbtWrite` decides everything BEFORE it mutates.** A throw part-way
+  through would leave the in-memory question changed with nothing written — the
+  screen saying it moved and the database saying it did not, which is the one
+  state that whole write path exists to make impossible.
+- **`aiPickTopic` is exempt from the grounding census** by name, on the same
+  footing as `aiSuggestTags` and the 🎯 objective classifiers: it is metadata
+  about a question, not science said to anybody.
+- Run **`node tools/bulk-topics-tests.mjs`** after touching any of it.
+
+## 🖨 Preview printed — a bank or vetting question exactly as it prints (v1.349.0)
+
+`_wsPreviewAdhoc` and its branch in **`_wsPreviewCtx`** / `_wsShowPreviewOverlay`
+/ `printFromPreview` / `_wsPreviewSnapshot` / `_wsQeReopenPreview`, plus
+`previewQuestionsPrint` / `previewOneQuestionPrint` / `qbulkPreviewPrint` /
+`printQuestionsDirect` (search `PREVIEW PRINTED`), the 🖨 button on every bank
+row, bank tile and vetting card, and 🖨 **Preview printed** on the 🧰 tools bar.
+
+"How will this look when it prints?" was answerable only for a worksheet. A
+question in the bank or waiting in vetting could be read on screen and printed
+blind — and the printed sheet is a **different rendering entirely**: the picture
+is capped in millimetres, the answer boxes are sized from the model answer, a
+fill-in-the-blank prints BLANK, an MCQ grows an answer bracket, and the whole
+thing is measured and paginated onto A4.
+
+- **IT IS THE SAME PREVIEW, NOT A SECOND ONE**, and that is the whole promise.
+  It is a third **context** on `_wsPreviewCtx`, so `renderWsPreview` →
+  `buildWorksheetHtml` → the print planner is byte-for-byte the path a saved
+  worksheet takes. A preview of its own would be free to drift from the PDF —
+  and it would drift in the direction nobody checks, which is the printed sheet
+  in front of a class.
+- **THE PRINT IS THE SAME CALL TOO.** `printFromPreview` hands an ad-hoc set to
+  `printQuestionsDirect` → `doPrintStudentWorksheet`, the very function
+  `reprintWorksheet` and `printStudentWorksheet` end at.
+- **THE SET IS CARRIED AS QUESTIONS, NOT AS IDS**, because a VETTING question is
+  not in the bank: `_wsSavedQuestions` and every other id-based reader looks in
+  `questionBank` and would come back empty for the whole sheet.
+- **…but the SNAPSHOT is carried as ids** (`_wsPreviewSnapshot`), for the reason
+  a paper is rebuilt from its arguments: an edit replaces the bank's entry, so
+  reopening on the held objects would show exactly the copy that was just fixed.
+  `_wsQeReopenPreview` re-resolves against the list the `source` names.
+- **✏️ Editing mode is offered on a BANK set and never a vetting one.**
+  `emSaveAll` writes through `saveQuestion`, which would quietly move a vetting
+  question into the bank. ✎ Questions is hidden for both — there is no stored
+  list to add to or remove from.
+- **It uses the `bank` surface of `WNY_SWITCHES` / `AKX_SWITCHES`** — the 🖨
+  print picker's own switches — rather than inventing a second pair of
+  checkboxes for the same two options.
+- **No cover and no name/date/class strip**: this is a proof of one question or
+  a handful, not a worksheet being handed out.
+- **Every opener clears all three slots.** One left set is a preview showing the
+  last thing that was open — the paper from an hour ago, under the button just
+  pressed.
+
+### 👁 Exported hover preview in Vetting (v1.362.0)
+
+`vetPrintPeek*` adds an eye immediately before each Vetting card's AI traffic
+light. Hover or keyboard focus opens a scrollable exported proof; click/tap
+opens the existing full preview. The panel also offers Edit question.
+
+- Build lazily after a short dwell, from a fresh Vetting lookup and a deep copy.
+  No AI requests, database writes, approvals or editor-state changes on hover.
+- Use `buildWorksheetHtml` and the shared `_wsWritePreview` / `_wsPreviewPack`
+  path, including print CSS, image dimensions, fonts and answer-key pagination.
+  Scale the iframe externally, retaining its A4 layout for measurement.
+- The hover passes `readOnly:true`: no page-break/edit/delete tools, no changes
+  to worksheet preview contexts, global manual breaks or the full view's count.
+  Ordinary full previews retain their tools and settings.
+- Serial checks discard late image/font work after a different eye is opened.
+  Keep the panel open while the pointer or focus is inside; Escape, outside
+  clicks, navigation, list refresh and viewport changes dismiss it. Restoring
+  focus on dismissal must not immediately reopen the preview.
+- Run `node tools/vetting-export-hover-tests.mjs`, `node tools/bulk-topics-tests.mjs`,
+  `node tools/preview-return-tests.mjs` and `node tools/answer-key-pagination-tests.mjs`.
+
+### 🖨 …and the question open in the EDITOR (v1.350.0)
+
+`previewEditorPrint` / `_wsPreviewIsDraft` and the `source: 'editor'` branch,
+plus the 🖨 **Preview Exported** button beside 🎓 Preview as Student in BOTH
+action rows of the question editor.
+
+🎓 Preview as Student shows the question the way a child answers it — tap an
+option, type in a box, press Check. The **exported PDF is a different rendering
+entirely**: the picture capped in millimetres, the answer box sized in ruled
+lines from the model answer, a fill-in-the-blank printed BLANK, an MCQ with an
+answer bracket, the lot measured and paginated onto A4. Seeing it used to mean
+saving the question and going to find it.
+
+- **It is the SAME ad-hoc preview**, so it is the same builder, planner and
+  printer a saved worksheet's PDF goes through, and 🖨 Print / Save PDF works
+  from it. Nothing here is a second renderer.
+- **IT READS THE EDITOR, NOT THE BANK** — the whole point is the question as it
+  is being written — so `syncEditorDomToBlocks()` runs FIRST or the preview is a
+  keystroke behind, and the blocks are **deep-copied**: the preview must not be
+  able to write back into the editor's own array.
+- **The LIVE blocks, never `collectQuestionData()`'s output.** That converts a
+  table's rows into a Firestore-safe object on the way out, and the print path
+  reads the editor's own array-of-arrays shape.
+- **IT MUST STAND DOWN IN ✏️ EDITING MODE** — the trap `_akdEditorQuestion`
+  documents: with the sheet open the global `blocks` is the WHOLE PAPER and the
+  create page's own fields still hold whatever was last open there.
+- **`source: 'editor'` HIDES EVERY TOOL THAT REACHES INTO THE BANK.**
+  `_wsPreviewIsDraft()` is the ONE predicate: ✏️ edit question, ✏️ edit answer
+  and ✏️ Editing mode all open a question in the bank, and this one may never
+  have been saved while its author is already standing in the editor. For the
+  same reason `_wsPreviewSnapshot` returns **null** for it — there is no list to
+  re-resolve from.
+- **An unsaved draft still gets an id** (`__editor_draft__`): the planner keys
+  its manual page breaks by it. A question opened from the bank keeps its own.
+- **The button is in BOTH action rows** — create mode and edit mode are separate
+  rows in `index.html`, so one added to a single row is a button that is simply
+  not there half the time. The harness counts them.
+- Run **`node tools/bulk-topics-tests.mjs`** and
+  **`node tools/preview-return-tests.mjs`** after touching any of it.
+
+## "You may already have this one" — the duplicate warning (v1.293.0)
+
+`findDuplicateCandidate` / `checkEditorDuplicate` / `dupWatchKick` /
+`_dupGateSave` (in `app.js`, search `THE DUPLICATE WATCH`), plus the
+`#dupWarnBanner` at the top of the question editor and the 🟡 badge on a
+vetting card.
+
+The matcher itself is old: a token-overlap (Jaccard) score over the title, the
+body and the MCQ options, past `DUP_MIN_SCORE` (0.7). What was missing was
+everywhere it was not being asked.
+
+- **It used to be raised from ONE place — straight after 🤖 Build from
+  screenshot.** So a question TYPED into the block editor, pasted, built by the
+  passage builder, or opened and reworked was checked against nothing at all,
+  and the only duplicate warning in the app was a badge on a Rapid add card.
+  The bank fills up with the same question twice and nothing anywhere says so.
+- **The banner is LIVE.** `dupWatchKick` re-checks as the author works, so the
+  warning is on screen while there is still something to do about it. The
+  listener is **ONE delegated pair on `#page-create`**, for the reason the 拼音
+  IME's is: this app builds the editor's DOM continuously, so anything bound
+  per element covers the fields that existed when it ran and silently misses
+  every one made afterwards. **`renderBlocks` kicks it too** — a builder writing
+  blocks programmatically fires no `input` event at all.
+- **The SAVE asks as well, and that is the backstop.** A banner sits at the top
+  of a long editor and the Save button is at the bottom, so `_dupGateSave` is on
+  all three editor saves — ✅ Add to vetting, 💾 Save, and Save straight to the
+  bank. It is a **PROMPT, never a block**: only the author can tell a real
+  duplicate from two questions that merely share a stem, so "Save anyway" is
+  always there.
+- **The gate is a PASS-THROUGH, never a second write path.** Each save function
+  keeps its body in a `*Confirmed` twin, so answering "Save anyway" ends at the
+  same door — and therefore the same ordering guarantees — as before.
+  `tools/question-persistence-tests.mjs` pins that.
+- **The VETTING LIST is searched as well as the bank**, and the result says
+  which (`_dupWhereLabel`). The commonest duplicate of all is the same
+  screenshot read twice in one sitting, and BOTH copies are then in vetting,
+  where a bank-only search sees neither — nothing was flagged, and the pair was
+  approved into the bank one after the other.
+- **`_dupStillThere` is the ONE place a suspected twin is checked for existence**,
+  and it reads both lists. The vetting card used to ask `questionBank` alone, so
+  a twin that is itself still in vetting made the badge vanish.
+- **The banner's 👁 button ASKS before it leaves** (`dupOpenOriginal`). The
+  banner is on screen while the author is mid-compose, so loading the twin
+  replaces the draft they are looking at; hovering the same button previews a
+  BANK twin without leaving at all, which is the answer most of the time. The
+  vetting card's copy of the button needs no guard — nothing is being typed
+  there — which is what the third argument to `_dupSeeOriginalBtn` selects.
+- **The hover preview is attached only for a BANK twin.** `ppBankHoverHtml`
+  reads `questionBank` and nothing else, so a vetting original would open an
+  empty card that reads as a broken preview.
+- Run **`node tools/duplicate-warning-tests.mjs`** after touching any of it.
+
+### ⇄ Side by side — the comparison the warning was missing (vv1.295.0)
+
+`dupCompare` / `_dupFindQuestion` / `_dupCompareSide` / `_dupDiffHtml`
+(search `SIDE BY SIDE`), plus the `#dupCompareOverlay` in `index.html`.
+
+The banner said *"this looks 90% like Sharing a Sum of Money"* and offered
+exactly ONE button: **open** that question. Which replaces the draft — so the
+only way to answer the question the banner asks (*are these two the same?*) was
+to throw away the thing being compared, go and look, and then build it again
+from memory. Nobody does that, so the warning got clicked past, which makes it
+a warning that costs attention and buys nothing.
+
+The two questions now go up **next to each other**: what is being written on the
+left, what is already filed on the right.
+
+- **Both sides go through the SAME renderer** — `renderQuestionBodyPreviewHtml`,
+  split out of `renderQuestionPreviewHtml` so it takes the question OBJECT
+  rather than an id, because the left-hand column is a draft that has never been
+  saved and has no id to look up. A second renderer written for this view would
+  be free to drift, and a comparison whose two halves are drawn by different
+  code can flatter one of them.
+- **Nothing is written and nothing is replaced by opening it.** It is a read.
+  The one destructive action — loading the original into the editor — lives in
+  the overlay's foot, still behind `dupOpenOriginal`'s confirm, and is now
+  reached only by somebody who has actually seen what they are about to lose. It
+  is **hidden** when the left-hand side is a saved question (a vetting card),
+  because there is no draft to lose there.
+- **`mineId` names the LEFT-hand question.** A vetting card passes its own id;
+  the editor banner passes nothing, and the draft is read from
+  `_dupEditorQuestion()`. That third argument to `_dupSeeOriginalBtn` used to be
+  a boolean `guard` — same position, different meaning, so check both call sites
+  if you change it.
+- **It says what differs IN WORDS** (`_dupDiffHtml`, through the matcher's own
+  `_dupTokenSet`). Two near-identical questions are near-identical to LOOK at,
+  which is the whole problem: the eye slides straight over the one changed
+  number. The words appearing on one side only are the fastest honest answer to
+  "so what did they change?", and a diff computed on any other footing would
+  contradict the percentage printed above it. When both lists are empty it says
+  *word for word the same*, which is the strongest thing it can tell an author.
+- Run **`node tools/duplicate-warning-tests.mjs`** after touching any of it —
+  the direction of the difference strip is the silent one: reversed, the two
+  lists read perfectly and tell the author the opposite of the truth.
+
+## 🔍 Answer key cross-check — TWO engines at once (v1.296.0)
+
+`akc*` (search `ANSWER KEY CROSS-CHECK`), plus `#akcOverlay`, the `#akcBankBar`
+on the Question Bank and 🔍 Check answer keys on a 📄 My Worksheets card.
+**Ported from `polymathlc/math`, which carries the same block — keep the two in
+step**; what genuinely differs here is the question SHAPE and the agreement
+test, and both are called out below.
+
+✅ Check Questions serves a question back to a HUMAN for a second pair of eyes.
+This asks **two models** — ChatGPT (`gpt-6-astra` by default) and Gemini
+(`AI_MODEL`) — to answer every question from scratch **simultaneously**, and
+reports their two answers beside the teacher's own key, with a recommendation.
+Gated on `_canAuthor()`.
+
+- **The two calls are `Promise.all`ed and neither model is shown the other's
+  answer.** That independence is the only reason an agreement between them
+  means anything — chain them and the second is just agreeing with the first.
+- **`skipOpenAi: true` on the Gemini call is load-bearing**, and it is why
+  `askGeminiVision` / `askGemini` grew that option at all. They route through
+  ChatGPT whenever the sidebar's engine toggle says so, so without it both
+  columns are the same model twice: they would then agree constantly and the
+  report would read as a clean bill of health.
+- **Both engines get the identical prompt**, built once per question. A
+  comparison between two models asked different questions compares the
+  questions.
+- **It READS ONLY — no path here writes a question.** Every row ends in a
+  recommendation. A model that is confidently wrong must not be able to
+  overwrite a teacher's key; ✎ Edit opens the question in the editor instead.
+- **The key is read through the SHARED printed-key pushers.** `akcKeySections`
+  calls `_pushBlockAnswerKey` / `_pushAnswerKeySection` — the same two the
+  printed answer key uses — so what is checked is exactly what the teacher
+  prints and marks from. A second answer reader written for this feature would
+  be free to drift, and a cross-check comparing against the wrong half of a
+  question is worse than no cross-check. An MCQ is a **block** here
+  (`correctId` against `options[].id`), which is the main shape difference from
+  the Maths app's copy.
+- **`akcCompare` is PLAIN CODE, never a third AI call.** The same two answers
+  must always produce the same advice. Its statuses: `agree` (green), `guide`
+  (answer right, model answer flagged), `split`, `no-key`, `single`,
+  `key-wrong` and `split-none` (both red), `failed`.
+- **`compare.tone` is the ONLY thing that colours, tallies and sorts a row.**
+  One status can carry two colours — a lone engine agreeing with the key is
+  amber, a lone engine contradicting it is red — so a lookup table keyed on
+  `status` would be a second opinion about the first.
+- **A science answer is usually a SENTENCE, so agreement is decided in three
+  different ways and the split between them is the whole safety story.**
+  - An **MCQ** is compared by option NUMBER, never by the words.
+  - A **number** is settled on its numbers and then its units through
+    `AKC_UNIT_CANON`: "24" and "24 g" agree (one side left the unit off),
+    "24 g" and "24 kg" do not. The text test is never allowed to rescue a
+    numeric disagreement — "the mass is 24 g" and "the mass is 42 g" share
+    every content word.
+  - A **worded** answer against the KEY is settled by the engine's **own
+    `statedAnswerVerdict`**, because that is a semantic judgement no token
+    count can make: "a good conductor" and "a good insulator" are one word
+    apart and opposite, while "the water evaporated" and "the liquid turned to
+    vapour" share no words and are the same answer. `unsure` falls through to
+    the words.
+  - Engine against ENGINE has no verdict to read (neither saw the other), so it
+    uses `akcTextOverlap` — **JACCARD, shared over the UNION, never an overlap
+    coefficient**. Over the shorter side, conductor/insulator scores 0.67 and
+    reads as agreement; over the union it is 0.50 and does not.
+- **The bank's window is a filter ON TOP of what the bank is showing**, so the
+  count on the button is the set the eye can see — `_akcSyncBankBar` runs from
+  `renderQuestionBank`, which is every keystroke in the filters. An undated
+  question can only ever appear under "any time".
+- **Which rows are expanded is state (`_akc.open`), not a class on a div** —
+  the report re-renders on every result that lands, so a panel opened mid-run
+  would snap shut under the teacher reading it.
+- Guards: `AKC_PAR` questions in flight, `AKC_MAX` per run, a confirm over
+  `AKC_CONFIRM_OVER`, ⏹ Stop honoured between questions, and closing the
+  overlay stops the run rather than leaving model calls billing away behind it.
+- The handlers are bound **lazily** (`akcBindOnce`), because the block sits
+  above the point where `$` is declared and must not touch the DOM at
+  module-evaluation time — the usual temporal-dead-zone trap.
+- Run **`node tools/answer-key-check-tests.mjs`** after touching any of it.
+
+## One ChatGPT key for all four portals (v1.296.0)
+
+`AI_ENGINE_STORE` (search `ONE KEY, ALL FOUR PORTALS`).
+
+The four apps are sibling folders on ONE GitHub Pages origin
+(`polymathlc.github.io/{math,english,chinese,cer}`), so they have always shared
+a localStorage — they were simply writing **different slots** in it, which meant
+the same key had to be pasted once per subject.
+
+- **It is not a convenience.** 🔍 Answer key cross-check needs ChatGPT and
+  Gemini BOTH live to be worth running, so an app missing the key runs it with
+  one column and reports "no second opinion" forever — which looks exactly like
+  a working feature.
+- **The four slot names are `sq_ai_engine` / `sq_openai_key` /
+  `sq_openai_model` / `sq_openai_image_model` in ALL FOUR apps.** They are this
+  app's original names because this is where the key already was; Maths
+  migrated onto them and copies its old `mq_` values across **only into an
+  empty slot**, so a stale key cannot sign the other three apps out. Do not
+  rename them to something subject-neutral without migrating all four at once.
+- **The key is NEVER in the repo.** These are public, static sites served to
+  every student's browser, so a key committed here is a key handed to the whole
+  school. It lives in the admin's own browser; both harnesses fail on an
+  `sk-`-shaped string in the source.
+- Run **`node tools/answer-key-check-tests.mjs`** after touching any of it.
+
+## 📌 The standing instruction — a note the teacher types, not uploads (v1.309.0)
+
+`_notesGuidanceBlock` / `openQuickNote` / `quickNoteSave` / `NOTES_GUIDE_CHARS` (in `app.js`,
+search `STANDING INSTRUCTIONS`), plus the `#quickNoteOverlay` in `index.html`, the ✍️ **Add a
+note** button at the top of the 🎯 Teaching Notes page and the **General guidance** field in the
+note editor. **Ported from the Ans Key annotator (`polymathlc/anskey`), which shares this very
+collection — keep the two in step.**
+
+Uploading a PDF and waiting for the AI to read it is the right shape for a set of notes and the
+wrong shape for one sentence. Most of what a teacher wants the AI to do is one sentence — *always
+name the process*, *units on every numerical answer*, *never accept "it dries up"* — and there was
+nowhere to put it. So it went unsaid, and every question, answer and mark was written without it.
+
+- **It is a HOUSE RULE, so it is deliberately NOT filtered by topic.** Every other field here is
+  narrowed to the notes matching the question in front of us, which is what keeps a marking call
+  cheap; a rule that only applied to the matching notes would not be a house rule. `guidance` is
+  read across the WHOLE notebook and **leads** each digest — read after the extracted keywords it
+  would be competing with them, read first it is the rule they are applied under.
+- **It reaches all three digests** — `_notesMarkingBlock`, `_notesGenBlock`, `_notesAnswerBlock` —
+  so it is obeyed when a question is built, when a model answer is written, when something is
+  explained **and when a student is marked**. It is the only field that reaches marking as well as
+  answering.
+- **Guidance ALONE is worth a block.** All three digests used to bail out the moment there were no
+  keywords, standards or facts to report, so a teacher who had typed a house rule and uploaded no
+  documents at all would have been ignored entirely.
+- **Nothing is sent to the AI when one is saved.** What is typed is written to Firestore verbatim,
+  as a note with no topics — so it applies to everything — and with the extracted fields empty. It
+  is live on the next question, with no analysis step to wait for.
+- **The digests are the ONLY thing that changed.** No other AI function in this app was touched:
+  the three digest builders are the notes system's own, every call site is exactly where it was,
+  and no prompt outside this section was edited.
+- **One notebook, three apps.** `guidance` is Ans Key's field name and the Scan app writes it too,
+  so a rule typed in any of the three is obeyed in all three from the next question onwards. The
+  card says which app a note came from (`source`), because "I never wrote that" about a note
+  written on an iPad in another app is a genuinely confusing five minutes.
+- A hand-typed rule and an uploaded document are **listed apart** on the page rather than mixed
+  into one pile: they are read very differently — one is obeyed word for word, the other is a
+  source of keywords.
+- **A rule can be typed on a scanned ANSWER CARD, and it lands here** (scan v1.5.0, this app
+  v1.317.0). When the Scan app's answer is not good enough the teacher corrects it there and says
+  what should have happened in the same breath; that is written as an ordinary note in this
+  collection — `guidance` for the rule (so it reaches every digest here, marking included),
+  `keyFacts` for the corrected answer with its question above it (so it reaches an ANSWER and never
+  the marker, which is the standing rule), and **`sourceQuestion` for the question it was written
+  against**. `sourceQuestion` is for the READER and never for a prompt: the card shows it under
+  *Written against*, because a rule the teacher can no longer place is a rule they delete — and the
+  whole question in every prompt would drown the rule it was written to carry.
+- Run **`node tools/teaching-notes-tests.mjs`** after touching any of it.
+
+## 🧠 Learning from the teacher's own corrections (v1.353.0)
+
+`STYLE_DOC` / `styleEnsure` / `styleEdits` / `styleLessons` / `styleRecentEdits`
+/ **`styleBlock`** (beside `aiGrounding`, search `LEARNING FROM THE TEACHER'S
+OWN CORRECTIONS`), and the loop itself — `styleNoteGenerated` /
+`_styleEditRatio` / `STYLE_FIELDS` / **`styleHarvestQuestion`** /
+`STYLE_NOTE_SYS` / **`styleWriteNotes`** / `loadAnswerStyle` / `stopAnswerStyle`
+/ `styleSave` / `styleLearnedHtml` (search `① WHAT THE AI WROTE`), plus the
+🧠 panel at the foot of the 🎯 Teaching Notes page. **`polymathlc/anskey`
+carries the same loop over its own annotations — ship a change to both.**
+
+The teacher presses 🤖 AI answer, reads what comes back, and changes it. That
+change is the most direct statement there is of what this app got wrong about
+them, and it was thrown away the moment the question was saved.
+
+- **FOUR STEPS.** `styleNoteGenerated` records what the AI wrote, per answer
+  box; `styleHarvestQuestion` runs on the SAVE and compares it with what the
+  teacher left there; `styleWriteNotes` asks the model for the ONE lesson that
+  would have made it write the teacher's version first time; `styleBlock` puts
+  those lessons — and the most recent corrections themselves — into the next
+  answer's prompt.
+- **WHICH PROMPTS SEE IT IS THE WHOLE SAFETY STORY, and `styleBlock` is the ONE
+  place it is decided.** A correction is an ANSWER, so it reaches `'answer'`
+  and `'teach'` and nowhere else. **`'mark'`** would be a marker handed the
+  answer, and would start marking a child on whether they used the teacher's
+  wording. **`'check'`** is a second reader: told what phrasing the teacher
+  prefers it flags correct answers for wording, and the report then reads as a
+  clean bill of health inverted — the very failure `_notesCheckBlock` already
+  carries a caveat against. **`'gen'`** is authoring from a document, where the
+  document wins. `aiGrounding` appends the block on every branch and lets
+  `styleBlock` refuse; a gate written into `aiGrounding` instead is a gate the
+  next branch added there forgets.
+- **ONE AI CALL PER CORRECTION, never a batch.** A batch is cheaper and brings
+  the one failure this can produce silently: a lesson attributed to the wrong
+  correction reads perfectly and teaches the app something the teacher never
+  said. Corrections are rare — a handful in a sitting — so the attribution is
+  free.
+- **A COSMETIC CHANGE IS NOT A CORRECTION.** `_styleEditRatio` is a word-level
+  Levenshtein and `_styleWords` trims punctuation off each word's edges:
+  dropping a full stop from a seven-word answer is one word in seven, well over
+  `STYLE_EDIT_TRIVIAL`, so without that trim a teacher tidying punctuation is
+  recorded as having rewritten the answer and the note writer is handed a
+  "correction" with no lesson in it. A model that finds no lesson is recorded
+  as having been ASKED (`noteTried`), or every save pays for the same empty
+  answer for the rest of the account's life.
+- **THE SLOT IS THE GENERATION, so a second pass at the same box SUPERSEDES the
+  first** rather than filing a halfway version beside it — the last thing the
+  teacher left in the box is the one that counts. Edited back to what the app
+  wrote, the correction is WITHDRAWN: leaving it teaches a lesson they have
+  just taken back.
+- **THE HARVEST RUNS ON BOTH SAVE DOORS** — `saveQuestion` and
+  `saveVettingQuestion`, the two functions every committed question already
+  goes through, so an authoring path added later is covered without being told.
+  It reads the question BEING SAVED, which has already been through
+  `syncEditorDomToBlocks`, so it is what the teacher really left in the box and
+  it is the same for every path. It never blocks a save: a lesson is worth
+  having and worth nothing beside the question.
+- **ONLY THE ADMIN TEACHES THE APP.** An employee is hired to write questions
+  into the teacher's bank; how the AI answers for the whole centre is not
+  theirs to rewrite — and the write would be denied anyway, failing closed.
+- **THE CORPUS IS THIS APP'S OWN DOCUMENT**, `users/{adminUid}/settings/answerStyle`
+  — the same shape the learning objectives already use, so it needs no rules
+  change. It is deliberately NOT the Ans Key app's `aiTraining/answerStyle`
+  under the same uid: that app teaches maths as well as science, and sharing the
+  document would put a maths correction into a science answer — exactly what
+  `_noteSuitsThisApp` exists to prevent from the other direction.
+- **`styleGen` is NOT persisted.** A generation the author never saved is not a
+  correction, and a page reloaded mid-edit is a change nobody could honestly
+  attribute. It comes down on sign-out with the corpus, or one account's
+  corrections go on grounding the next person to sign in on the device.
+- **A denied write is NAMED.** "Could not save" reads as the feature not
+  working; `permission-denied` here is a one-line rules fix on that path.
+- The panel is not decoration: a costly, invisible thing happening by itself is
+  a thing nobody trusts, so every lesson is shown beside the edit it came from
+  and one that is wrong can be deleted.
+- Run **`node tools/answer-learning-tests.mjs`** after touching any of it.
+
+## 🔄 The notebook is LIVE, and it is shared (v1.310.0)
+
+`loadTeachingNotes` / `_notesApplySnap` / `_notesDetach` / `stopTeachingNotes` /
+`_notesLiveRepaint` / `_noteSuitsThisApp` / `_notesFor` (in `app.js`, search
+`The notebook is LIVE`). **The collection `users/{adminUid}/teachingNotes` is written by three
+apps** — this one, the Ans Key annotator (`polymathlc/anskey`) and the Scan app
+(`polymathlc/scan`). Two things stopped a note written in either of the others from ever reaching
+this app's prompts, and both were silent.
+
+- **It was read ONCE at sign-in.** A `getDocs` meant this tab held whatever the notebook said when
+  the teacher signed in and never looked again: a note typed on the iPad mid-lesson reached the app
+  it was typed in and NO other, so the same question was marked against two different notebooks
+  depending on which tab it was marked in. It is now an `onSnapshot`. Three rules hold that
+  together, and each is a way it could go quietly wrong: **`_notesDetach` releases anyone waiting
+  on the first snapshot** (a waiter holding a promise whose listener has just been unsubscribed is
+  never answered, and `renderNotesPage` awaits it — the page would say "Loading your teaching
+  notes…" for the rest of the session); the listener **comes down on sign-out**, or one account's
+  notes go on grounding the next person to sign in on the device; and **`_notesLiveRepaint` yields
+  to whatever is being typed**, because `notesRenderBody` rebuilds the whole page and a snapshot
+  arriving mid-sentence would empty the upload comment box.
+- **A general note only applied when nothing else did.** The other two apps write `topics` EMPTY on
+  purpose — it is this app's syllabus list and they have never heard of it — so every note they
+  write arrives here untagged. The digests treated untagged notes as a FALLBACK
+  (`if (!rel.length) rel = untagged`), so the moment the teacher had one note of their own tagged
+  "Heat", the entire shared notebook was dropped from marking a Heat question. **`_notesFor(topic)`
+  is now the ONE place that is decided**: topic-matched notes first (so they win the character
+  caps), general notes always after them.
+- **…but a MATHS note is still not welcome.** The notebook is shared with an app that teaches both
+  subjects, and a maths marking standard in a science prompt is worse than no note at all.
+  **`_noteSuitsThisApp` is the ONE place that is decided** — a note naming no subject is for
+  everything (which is what every note uploaded here looks like), one naming maths and not science
+  is dropped, guidance included — so it cannot leak through whichever digest forgot to ask.
+  **A dropped note is still LISTED on the Teaching Notes page and says it is dropped**, because a
+  note sitting in the list reads as a note being followed.
+- Run **`node tools/teaching-notes-tests.mjs`** after touching any of it.
+
+## 🧠 ONE DOOR, and no note left unread (v1.327.0)
+
+`aiGrounding(kind, topic)` / `_notesFairShare` / `_notesField` / `_notesDedupe` /
+`_notesTrimTo` / `_notesLedger` / `notesLedgerFor` / `notesLedgerCounts` (in
+`app.js`, search `THE ONE DOOR` and `NO NOTE IS EVER SILENTLY DROPPED`), plus
+the ⚠️ fit warning at the top of the 🎯 Teaching Notes page and the **Trimmed** /
+**Not sent to the AI** row on a note's card. **`polymathlc/anskey` carries the
+same block — ship a change to both together.**
+
+Two things were reported as one: *"the notes don't seem to permanently learn my
+inputs"*, and *"make sure every AI function checks the teaching notes first"*.
+They turned out to be two separate silent faults.
+
+### The budgets were a `.slice()` over the JOINED notes
+
+`NOTES_GUIDE_CHARS` was **1600 characters of every standing instruction run
+together**. So with two hand-typed rules of that length, the first lost most of
+itself and **the second reached no prompt at all** — while sitting on the
+Teaching Notes page looking obeyed. Ten uploaded notes fared worse: about 12% of
+the key facts and 7% of the marking standards actually reached a prompt.
+
+- **They are POTS now, shared out.** `_notesFairShare` water-fills: every note
+  takes its floor first, then the remainder is handed round to whoever still
+  wants more. Two consequences and both are the point — a **SHORT note is never
+  trimmed at all**, and a long note is **TRIMMED rather than the next note
+  disappearing**. Read these constants as budgets to divide, never as a length
+  to cut to: restoring the `.slice()` restores the bug.
+- **THE BUDGET YIELDS TO THE NOTES, not the other way round.** When there are
+  more notes than the pot can floor, the pot GROWS to `n × minEach` — a house
+  rule the teacher typed outranks a token. `NOTES_HARD_CHARS` bounds that, and
+  it is **the only path on which a note is dropped**; when one is, it is named
+  in the ledger and the prompt says the list is incomplete.
+- **A trim SAYS it was trimmed** (`NOTES_TRIM_MARK`) and cuts on a word
+  boundary. A silent truncation reads to the model as a sentence the teacher
+  wrote that way.
+- **The same rule typed in two apps is ONE rule** (`_notesDedupe`). Left in
+  twice it eats the pot twice and reads to the model as emphasis nobody wrote.
+- **`_notesLedger` is what makes the remaining loss visible.** It is rebuilt on
+  every `aiGrounding` call, and `notesRenderBody` builds the fullest digest once
+  on open so the page says what really happens rather than what happened after
+  some other screen made a call. A note quietly cut to a third of itself reads
+  on that page exactly like one being obeyed in full — which is the whole bug.
+
+### 🚪 `aiGrounding(kind, topic)` — the one door
+
+There were ~70 model call sites in this file and **five** touched a notes
+digest. Everything else — the tutor, the hints, the explanations, the
+flashcards, the reports, ✂️ Shorten, ✍️ AI complete, ✅ Check Questions, the
+Question Doctor, 🔍 Answer key cross-check, auto-vet, Mark Paper's report, the
+annotation answer key, the widget builder — wrote science in **nobody's voice**.
+
+- **Five kinds, and the split is the safety story.** `'mark'` gets the standards
+  and **NEVER the key facts or the exemplar answers** — a marker handed the
+  answer stops marking against the paper. `'answer'` writes a model answer;
+  `'gen'` authors a question (the source document still wins); `'teach'`
+  explains, hints, drills and tutors (the recorded answer wins, and there is no
+  source document to point at); `'check'` is a second reader and says in as many
+  words that **the notes are a reference, not a standard to rewrite to** —
+  handed the answer digest's *"base the science and the wording on this database
+  FIRST"*, a checker starts flagging correct answers as wrong for using
+  different words, and the report then reads as a clean bill of health inverted.
+- **An unknown kind degrades to `'mark'`, and that is deliberate**: `'mark'` is
+  the kind that leaks least, so a typo'd `'marks'` must never be the thing that
+  hands a marker the answer. It also `console.error`s.
+- **`_markingPreamble` and `_genPreamble` are kept** — they are the SETTINGS
+  wrapper (strictness, the generation guide) around the door, not competing
+  doors, and they already fan out to nine call sites for free.
+- **A prompt builder is grounded ONE HOP up** — `_wnyPrompt`, `_fcDeckPrompt`,
+  `_aicPrompt`, `_mpReportPrompt`, `_vetBuildPrompt`, `akcPrompt`,
+  `_ainsteinBuildPrompt`, `_widgetSpecPrompt` and the four `_genPreamble`
+  builders. The block is spliced after the ROLE line and before the question and
+  the `Return ONLY JSON` tail: a grounding block put after the format
+  instruction is grounded and broken.
+
+### The census — the test that fails when a new call site is added ungrounded
+
+"Every AI function checks the teaching notes first" is a promise nobody can keep
+by remembering. `tools/teaching-notes-tests.mjs` reads `app.js` itself: it finds
+every `askGemini*` / `geminiModel.generateContent` call, resolves the function it
+sits in, allows one hop to a prompt builder, and **FAILS naming any function that
+is neither grounded nor in `UNGROUNDED_BY_DESIGN`** — a literal in the test file
+mapping a name to a one-sentence written reason. A **stale** exemption fails too,
+because that is how a renamed function slips back through.
+
+The exemptions are transport (`askGemini`, `_aiRun`, `_widgetAskAI`,
+`akcAskEngine`, …), the notes reader itself, **transcription** (a transcriber
+told what the answer should say writes that down instead of what is on the
+page), pictures, **metadata about questions** rather than science said to
+anybody, `snapFindAndMark` (it MATCHES; the marking goes through
+`markOpenAnswersIn`, which is grounded) and `runOeqCompare` (the official PSLE
+key is the authority there, not the notes).
+
+- Run **`node tools/teaching-notes-tests.mjs`** after touching any of it.
+
+## Versioning convention — applies to EVERY change (do this every time)
+1. **Bump the version.** In `index.html`, update `const APP_VERSION = 'vX.Y.Z'` (search `APP_VERSION`). Patch bump for fixes/small tweaks, minor bump for new features.
+2. **Keep it visible.** The version renders in the sidebar footer for admins only (`#appVersionBadge`, class `admin-only`). This is how the user confirms the latest build is actually deployed.
+3. **Report it.** When summarising an update in chat, always state the new version number (e.g., "Shipped in **v1.0.3**").
+
+The whole point: the user checks the version shown in the app's sidebar against the number reported in chat to know whether the upload/deploy went through. (The user wants this as a standing feature for all their projects — mirror this section into other repos' CLAUDE.md / their global memory.)
+
+## Design convention — breathing space (applies to EVERY UI you build/touch)
+- Give elements room to breathe: generous, consistent padding inside cards/banners, clear vertical spacing between title → description → meta → buttons, and comfortable line-height. Never cram content edge-to-edge or stack lines tightly.
+- Cards/banners are rounded rectangles constrained to a sensible max-width (not full page width) and centered — not a dense, full-bleed block.
+- When the user says something is "too big/thick/messy", the fix is usually *more* whitespace and a tighter width, not shrinking fonts until it's cramped.
+- Keep spacing scale consistent across the whole app so every surface feels like the same design system.
+- (The user wants this as a standing design principle for ALL their projects — mirror this section into other repos' CLAUDE.md / their global memory.)
+
+## 📊 The Student Usage Tracker (v1.297.0)
+
+`USAGE_MODES` / `usageMode` / `_sut` / `sutRender` / `sutVisible` / `sutByMode` /
+`sutExportCsv` (in `app.js`, search `THE STUDENT USAGE TRACKER`), plus the
+`#studentDetailOverlay` and the `.sut-*` CSS in `index.html`. Opened by clicking
+a student anywhere on the Usage page. **The same block is in all four portals —
+keep them in step**; only the collection constant and the mode table differ.
+
+Every question one student has completed, the result they got, and the **mode**
+they did it in. The attempt log was always being written; what was missing was a
+way to READ it. The old drill-in listed the rows and nothing else, so a teacher
+looking at four hundred attempts could not answer either of the two questions
+they actually have — *what has this child been doing?* and *how are they getting
+on in it?* A list that can only be scrolled is a list nobody reads.
+
+- **`USAGE_MODES` is the ONE place a raw mode string becomes words.** The log
+  stores `tcg-siege`, `quickpractice-open`, `snapmark-open` — internal names, not
+  English. The chip, the breakdown, the filter dropdown and the CSV all read that
+  map, so they cannot drift apart. A mode with **no entry still shows**, as its
+  own raw string in the `other` group, rather than being dropped or folded into
+  "Unknown": an unlabelled mode is a missing label, but a question dropped out of
+  the log because nobody wrote a label for its mode is a **missing question**,
+  and two unlabelled modes merged into one row is a breakdown that lies.
+- **The breakdown BY MODE is the headline, not the log.** "43 in Quick Practice
+  at 71%, 210 in Ember Siege at 88%" is what a teacher opened this for; the
+  row-by-row log is the evidence underneath it. Practice modes sort ahead of
+  games, so the schoolwork is read first even when a game has more attempts.
+- **It renders from state.** `_sut` holds the attempts and the filters and
+  `sutRender()` paints the whole overlay from them, so changing a filter never
+  re-reads Firestore — sweeping through the modes is instant and costs nothing.
+  `closeStudentDetail` clears `_sut.uid`, which is also what makes a reply from
+  a superseded load harmless.
+- **`sutVisible()` is the ONE place the window is decided**, and the count, the
+  table, the breakdown and the CSV all read it. A CSV holding more rows than the
+  table it came from is a teacher sending a parent a report of work in a mode
+  they had filtered away.
+- **The verdict threshold is the app-wide ≥0.95** that `progressOnMarked` and
+  `lgNoteWin` already use, and `sutCredit` is FRACTIONAL — a half-marks open
+  answer is **part right**, its own verdict, never rounded into a pass or a fail.
+- **The title and topic are resolved from the BANK at read time**
+  (`sutQuestionMeta`), not trusted from the attempt: the games log no title at
+  all, and an edited question would otherwise wear its old title in the log
+  forever. A question **deleted since** is marked *removed from the bank* and
+  keeps its row — the work was still done.
+- It is **READ-ONLY**. Nothing in the block writes anything anywhere.
+- Run **`node tools/usage-tracker-tests.mjs`** after touching any of it.
+
+### 📖 What they wrote, and the teacher's own mark (v1.323.0)
+
+`_attemptAnswers` / `SUT_ANS_CHARS` / `SUT_ANS_PARTS` (beside `_setPartResult`),
+and `sutOverrideOf` / `sutAnswerRowsHtml` / `sutOverrideHtml` / `sutToggleRow` /
+`sutSaveOverride` / `sutClearOverride` in the tracker. Click any row in the log.
+
+The tracker could say a child got **2 out of 3** and could never say what they
+put. So every mark was unarguable: a teacher who thought the AI had it wrong had
+nothing to look at, and a child saying *"but I wrote the right thing"* could not
+be checked. An attempt stored a score and an `answerHash` — a 32-bit
+fingerprint, one-way, and there only to stop the same answer being re-submitted
+for the monthly tally.
+
+- **`_openPartResults` already held it.** It is what the running score, the
+  per-part feedback and the revision flashcards are all built from, so nothing
+  new is computed at marking time — `_attemptAnswers` reads it out and writes it
+  down. All THREE marked writers carry it (the whole-question mark, the per-part
+  finalisation and the annotation path); they had to be changed together, and a
+  fourth added later must be too.
+- **The label is DERIVED FROM THE KEY**, never passed in. `_setPartResult` has
+  six call sites across three marking paths, and a seventh argument threaded
+  through all of them is six chances to forget one — a part logged with no name
+  reads on the panel as an answer to a question nobody can identify.
+- **Both caps matter.** An attempt is a document, a document dies at 1 MB, and a
+  child pasting an essay into one blank must not be able to make their own
+  attempt unwritable: a lost attempt is a lost mark.
+- **The panel has THREE states and telling them apart is the whole job**: an
+  attempt from before this shipped says the wording cannot be recovered; a GAME
+  says it logs whether the answer was right and never what it was; everything
+  else shows every part. An empty panel with no explanation reads as a broken
+  feature, and a teacher who reads it that way stops opening it.
+- **The answer is ESCAPED.** It is text a child typed, rendered into the
+  teacher's page.
+
+**The override is the TEACHER'S RECORD, not the student's points.** It changes
+what this dashboard, its averages, its filters and its export say — which is what
+a teacher marks and reports from. It deliberately does not reach back into XP,
+gold or leaderboard standing: those were awarded on the student's own device at
+the time, an admin **cannot write another account's hero doc at all** (that is
+what the broadcast-marker pattern exists for), and minting points weeks later
+would leave two boards disagreeing with nothing to say which is right. The panel
+says so in as many words rather than leaving it to be assumed.
+
+- **`sutCredit` is the ONE place the override is honoured**, so the row, the
+  result filter, the by-mode breakdown, the summary cards and the CSV all follow
+  from one line. A second reading of `override` elsewhere is how a row shows
+  *Correct* while the average still counts it wrong.
+- **A score that will not parse is NOT an override** (`sutOverrideOf`). A stray
+  field must never silently rewrite a mark, and a row reading "overridden" with
+  the AI's number under it is worse than one nobody touched.
+- **The doc id must survive the read.** `showStudentDetail` keeps `d.id` now —
+  a row that has forgotten which document it came from cannot be corrected.
+- **Which rows are expanded is state (`_sut.open`), not a class on a `<tr>`** —
+  the table is rebuilt on every filter change and after every override, so a
+  panel opened by hand would snap shut under the teacher reading it. It is
+  cleared on every fresh open, or rows left expanded from the LAST student would
+  open different questions under the same ids.
+- **A denied write is NAMED**: "this account is not allowed to update the
+  attempt log" is a one-line rules fix, and *AI error* would send the teacher
+  anywhere but the console.
+
+⚠️ **`questionAttempts` is readable by any signed-in account** in the sibling
+app's rules, and this app's rules live only in the Firebase console. These rows
+now carry a child's own words, so that read rule is worth tightening to
+`allow read: if isAdmin() || resource.data.uid == request.auth.uid;` — which
+still serves both readers (the admin's unfiltered sweep, and a student's own
+`where('uid','==',uid)` query for My Report).
+
+- Run **`node tools/usage-tracker-tests.mjs`** after touching any of it.
+
+### 🧠 A mode written from ANOTHER app — the Mindmap (v1.376.0)
+
+The Mindmap app (`polymathlc/mindmap`, `js/cer-questions.js`) lets the teacher pin
+questions out of THIS bank (`users/{adminUid}/questions`, resolved through the same
+`config/admin` pointer) onto a shape, and a student answers them on the map. Its
+multiple-choice answers land in `questionAttempts` under the mode **`mindmap`**, so
+that row is in `USAGE_MODES` here. A mode written from outside `app.js` needs its label
+more than most: unlabelled it reads as a mode somebody forgot rather than as a mindmap.
+It READS the bank and writes nothing but that attempt row; it serves only what
+`qInSyllabus` / `qReleased` would serve, through its own copy of those gates (a copy of
+the RULES, not of the topic list). **Rename the mode, the collection or the release
+fields here and that app goes quietly out of step — ship a change to both.**
+
+### Every mode must actually log (v1.297.0)
+
+The tracker is only as good as the weakest game: a mode that pays points and
+writes no attempt is a mode whose questions the teacher cannot see at all, and
+nothing on any screen says so.
+
+- **`logGameAttempt(q, correct, mode, ms)` is the ONE door.** Three
+  near-identical copies had already been written (the trainer, the duel, the
+  Siege) and a fourth was simply missed — **Ember Legends called
+  `rpgAwardGameQuestion` and logged nothing**, so a student could answer two
+  hundred questions inside it and the tracker showed none of them. Adding a game
+  is a call here plus a row in `USAGE_MODES`, never a fourth copy.
+- **A mode arriving from an EMBEDDED GAME is checked, not trusted.**
+  `_sdRecordAttempt` used to map anything unrecognised to `defenders`, so
+  **Science Spire's questions were filed under a game the student never opened**.
+  `SD_GAME_MODES` is the list; an unknown mode still falls back rather than
+  writing a mode nothing can label.
+- It is fire-and-forget, and the local rotation stamp comes FIRST: a failed log
+  must never interrupt a game mid-answer, and a question answered offline must
+  still stop being re-served.
+
+## 🛟 Art safety & recovery — the art map is ONE document (v1.300.0)
+
+`TCG_ART_BACKUP_DOC` / `tcgArtBackupSync` / `tcgArtRestoreBackup` /
+`tcgArtExport` / `tcgArtImport` / `_tcgArtWriteMany` / `tcgArtRescue*` /
+`_tcgArtLoadFailed` (search `ART SAFETY & RECOVERY`), plus the `#tcgArtSafety`
+panel at the top of the Card Art tab and the `.tcg-safety-*` / `.tcg-rescue-*`
+CSS in `index.html`.
+
+Every picture in Realm of Embers — card art, `:av` battle avatars, `fx:` and
+`dfx:` frames, `pk:` pack frames, `arti:`, `hero:`, `logo:`, `set:`, `lore:` —
+is **one key in one Firestore document's `overrides` map**. Hundreds of hours of
+generated artwork, and a single map deciding what the game shows.
+
+**That map was lost once.** The Maths app (`polymathlc/math`) carries a port of
+this game with the card ids deliberately kept identical (`c001`, `<id>:av`), it
+was writing **this very document**, and its ♻️ Reset ALL art did
+`setDoc(..., { overrides: {} })` — a whole-document overwrite. One press, both
+games blank. That app has its own document (`novaArt`) and a surgical reset now,
+so it cannot happen from that direction again; this section is what makes the
+map survivable whatever happens next.
+
+- **THE PICTURES ARE NOT THE MAP**, and that is the whole reason recovery is
+  possible at all. Uploads are content-addressed into `cer-images/`, nothing
+  here has ever deleted one, and the Maths app writes to `mathImages/`. The
+  artwork outlives any accident to the index.
+- **The backup MUST NEVER SHRINK.** A wipe presents as an empty map, so a
+  backup that mirrored the live map would faithfully copy the wipe over the last
+  good copy — turning the safety net into a second way to lose everything, at
+  the exact moment it is needed. `tcgArtBackupSync` writes only when the live
+  map holds **at least as many** pictures as the backup already does. Going
+  backwards is always the ↩️ button, never something that happens by itself.
+- **A failed read is NOT an empty store.** `_tcgArtLoadFailed` is what keeps
+  "the network hiccuped" from reading as "your artwork is gone" — and the
+  natural response to the latter is to redraw everything. It suppresses the
+  backup (backing up an unreadable map writes "0 pictures" under a name that
+  says the collection is safe) and the panel says so in as many words.
+- **Restore, import and rescue are ADDITIVE, all three.** They exist to fill
+  gaps, so every one of them writes only into slots that are **empty**. A
+  recovery tool that overwrites work is the fault this section answers.
+- **`_tcgArtWriteMany` is the ONE writer they share** — merged and chunked,
+  never a whole-document overwrite.
+- **🚑 Rescue matches on WHAT THE PICTURE SHOWS, not where it sits** (v1.301.0).
+  The first version laid every run onto the whole dex in order, and it was wrong
+  in the most misleading way possible: art is generated a SET at a time, so the
+  National Day run got filed onto monster slots — human knights and sorceresses
+  proposed for a tiger, a turtle and a polar bear, each captioned with a name
+  that had nothing to do with the picture. **A nudge of one cannot cross a gap
+  of a hundred**, so two things were added and both are needed.
+  - **The SCOPE** says which family of slots a run belongs to (each set, or the
+    whole dex). It narrows the target sequence *and* the AI's candidate list,
+    which is why it earns its place twice: a National Day sorceress can never be
+    offered a monster's slot. The worked example in the prompt uses an id **from
+    that scope** — hard-coding `c001` was itself a suggestion to answer outside
+    the list.
+  - **🔍 Identify with AI** shows each picture to `askGeminiVision` with the
+    scope's cards as candidates. Every card is a named character with an element
+    and a creature behind it, so the model can say which it is and the admin can
+    check it against the thumbnail beside it.
+  - **The ALPHA CHANNEL decides card art from battle avatar**, never the model:
+    card art keeps its painted scene and an avatar is background-stripped on the
+    way into storage, so this is a fact about the file rather than a judgement.
+  - **An identification always beats a position, and `identRan` is what keeps a
+    guess from creeping back.** Once the pictures have been looked at, the
+    positional proposal is dead — a picture the model could not name is left
+    **unassigned** rather than filed under a guess, and one whose card is
+    already in place is marked *✓ already in place* rather than reading as a
+    failure. Nudging deliberately clears the identification, because a nudge
+    means "match by position again"; without that the buttons would appear to
+    do nothing.
+  - Duplicates keep the **more confident** picture, an invented card id is
+    dropped, and a slot that already holds art is never proposed.
+- **The positional fallback is still there**, and it works because of what
+  survives a wipe: the ORDER. `tcgGenerateAllArt` walks `TCG_CARDS` drawing each
+  monster's card art and then its battle avatar, strictly one at a time, so a
+  generation run lands in the bucket in exactly that sequence — and laying a run
+  back onto that sequence reconstructs the map. It is a **proposal, never an
+  automatic write**: card art is self-identifying (201 named monsters), so every
+  picture is shown with the slot it is about to be filed into and nothing is
+  saved until the admin says so. ◀▶ Nudge fixes a whole-run offset; ✂ stray
+  takes one bad upload out of the sequence and pulls everything **below** it
+  back into line, which is the correction that matches the actual fault.
+- **A denied `listAll` is named precisely.** Listing needs `list` permission on
+  the folder in the Storage rules, which is a *different* permission from
+  reading a file by its download URL — so that one failure says so rather than
+  reporting an empty bucket, which would read as "your pictures are gone too".
+- 💾 Export is the off-platform copy, and it is the only one that survives the
+  Firebase project itself going wrong: a backup document lives in the same
+  project as the thing it protects.
+- Run **`node tools/art-safety-tests.mjs`** after touching any of it.
+
+## 🖼 The bundled Realm of Embers art — 659 pictures that ship with the app (v1.311.0)
+
+`TCG_ART_ROOT` / `tcgBundledArtPath` / `tcgBundledArt` / **`tcgSlotArt`** /
+`tcgSlotHasArt` / `tcgBundledSlotIds` / `tcgUseBundledRealmArt` (in `app.js`,
+search `THE BUNDLED REALM OF EMBERS ART`), plus everything under
+`assets/realm-of-embers/` and `tools/key-realm-sprites.mjs`.
+
+A complete art pass for the realm now lives **in the repository** — 201 card
+scenes, 201 battle avatars, 30 artifact objects, 180 elemental effect frames,
+42 pack-tearing frames and 5 hero portraits. Before this the game had 201
+monsters and 30 artifacts drawn as **emoji** unless an admin sat and generated
+every picture by hand, one slot at a time.
+
+- **It is a FALLBACK, not an import, and that is the whole design.**
+  `tcgSlotArt(slot)` returns the admin's override if there is one and the
+  bundled picture otherwise. Nothing is uploaded to Storage and nothing is
+  written to `users/{uid}/settings/tcgArt` — so `_tcgArt` stays exactly what it
+  was: the record of **what somebody has changed**, which is the only question
+  the backup, the rescue proposal and the safety panel's counts can usefully
+  answer. Copying 659 pictures into that map instead would have doubled the
+  thing that has already been lost once (see **🛟 Art safety & recovery**) in
+  order to store something git already holds.
+- **`tcgSlotArt` is the ONE reader**, and `tcgSlotHasArt` is the ONE has-check.
+  Every surface that puts a Realm picture on the screen goes through them —
+  `tcgArtUrl` / `tcgAvatarUrl`, `tcgFxHas`, `tcgPackHas` / `tcgPackFramesFor`,
+  `tcgHeroArtUrl`, `tcgArtifactArtUrl`, the Siege's frame preload, the pack on
+  the shop card, the set banner's line-up of legends. A reader left on `_tcgArt`
+  is a surface where the bundled layer silently does not exist, and the symptom
+  is one screen in the game still showing emoji.
+- **THE PATHS ARE DERIVED, NOT LISTED.** A card's file is its id plus the slug
+  of its own NAME, an artifact is its id plus the slug of its name, an effect
+  frame is its element and phase, and a pack frame is its set and tier — so a
+  card or a set added to the dex needs nothing typed out here twice. The price
+  is a rename: change a card's name and its picture is
+  looked for under the new slug, is not there, and the card quietly falls back
+  to its emoji. **That failure is silent in the app and loud in CI** —
+  `tools/bundled-art-tests.mjs` walks all 659 slots against both the shipped
+  slot map and the files on disk.
+- **The sprites are keyed at BUILD time** (`tools/key-realm-sprites.mjs`). Most
+  of the original sprite pass was drawn against a flat chroma wall; the
+  app keys that wall out on the way
+  through `_tcgArtStore`, and bundled art is served straight off the origin and
+  never passes that door. The tool runs the app's own `_screenKeyOut` — extracted
+  out of `app.js` the way `tools/chroma-key-tests.mjs` extracts it, never a
+  second copy — against a canvas shim backed by `sharp`, and it is idempotent:
+  a sprite already standing on nothing carries no wall and is left alone.
+  - **Its one deliberate difference is that it keys with `strict` OFF**, and the
+    reason is written out in the tool's header: these monsters defeat the
+    enclosed-hole geometry test wholesale (a coiled serpent, a dragon's wing
+    gaps and a ring of fire are all real wall seen through a real opening whose
+    surrounding material is thicker than the opening is wide), and the fallback
+    knock-out cannot reach an enclosed region at all, so refusing would have
+    shipped those coils full of magenta. What makes the looser cut safe there
+    and **not** at runtime is that it is a build step: the cut is pure colour,
+    every result is verified (nothing the wall did not touch was removed, none
+    of the wall is left anywhere, the sprite still has a body), a contact sheet
+    is written for a person to look at, and the sources are in git.
+  - **A wall is OPAQUE, and counting an empty pixel as evidence of one is the
+    trap.** An already-cut sprite has a fully transparent border, which reads as
+    a perfect ring of *every* colour at once — and the loser of that argument is
+    whichever hue the artwork happens to contain. A blue dragon would have had
+    its own blue keyed out on the second run. `detectScreen` therefore ignores
+    transparency entirely.
+- **Pack crop lines are removed from the files, not hidden with CSS.**
+  `tools/clean-realm-pack-borders.mjs` clears the outer three-pixel crop edge
+  on all 42 frames and removes only nearly-full-width bright source-sheet bands
+  near the top. `--check` is the regression test; it also prevents a future
+  sprite-sheet extraction from putting the thin white line back into the rip.
+- **🔥 Use the bundled artwork** (`tcgUseBundledRealmArt`, on the Card Art tab's
+  safety panel) is what is left of the old uploader: it **removes the overrides**
+  on those 659 slots so the shipped picture underneath shows. Nothing goes blank
+  — every slot it clears is a slot the app ships a picture for — and the backup
+  still holds what was removed, because `tcgArtBackupSync` refuses to shrink, so
+  ↩️ Restore puts it back. Like every other write here it is a chunked MERGE with
+  `deleteField()`, never a whole-document set.
+- **"Missing" now means NOTHING IS SHOWING**, for the generator's counts
+  (`_tcgArtMissing`, `tcgGenerateAllArt('missing')`, `_tcgHeroMissing`,
+  `tcgFxPhaseDone`, `tcgPackAnimReady`). Counting overrides would have put
+  "402 pictures for 201 monsters" on a button beside 201 monsters the students
+  can plainly see, and pressing it would spend hundreds of image calls redrawing
+  artwork that is already there. Replacing the bundled set is ↻ **Redraw every
+  monster**, which says so.
+  - **The rescue and backup counts deliberately did NOT change.** They answer
+    "what has an admin drawn that is now missing from the map", and an admin's
+    own artwork is still lost even when a bundled picture is standing in front
+    of the gap. The safety panel's alarm is the one that had to learn the
+    difference: it now counts only backed-up slots that nothing at all is
+    showing, or clearing an override would raise "art has gone missing" about
+    art the admin had just chosen to stop using.
+- Run **`node tools/bundled-art-tests.mjs`** after touching any of it.
+
+## ✂️ What counts as INK, and the sentence above the figure (v1.324.0, tightened v1.359.0)
+
+`_inkThreshold` / `INK_RATIO` / `_expandRectToWhitespace` / `_trimEdgeTextLines` /
+**`_trimBlankEdges`** / `EDGE_INK_MIN` / `EDGE_INK_FRAC` / `EDGE_SPECK_RUN` /
+`MAXRUN_FRAC` / `RUNS_MIN` / `RULE_FRAC` / `RULE_GROUPS` (in `app.js`, search
+`WHAT COUNTS AS INK`). **`polymathlc/english`, `polymathlc/chinese` and
+`polymathlc/math` carry the same block byte-for-byte — ship a change to all
+four together**; `polymathlc/scan` carries the same statistic under its own
+names (`_mbInkLevel`, `_mbTrimTextRows`).
+
+Both pixel passes asked *"is this pixel darker than 190?"*, and on a SCREENSHOT
+— white at 255 — that is exactly right. **⚡ Rapid add has taken camera
+photographs since v1.290.0**, and a photograph of the same worksheet is grey:
+the paper measures 180–200, the light slopes across the sheet, and 190 reads the
+whole page as ink. Both passes then find one band covering everything and do
+nothing at all — on every photograph, with nothing on screen to say they have
+stopped working, and the crop quietly back to being whatever rectangle the model
+happened to draw.
+
+- **So the line is MEASURED.** `_inkThreshold` takes the paper's own white as
+  the **98th percentile** of the luma over the rectangle being worked on, and
+  ink is `INK_RATIO` of that or darker. The top 2% is given away deliberately:
+  one specular highlight off a glossy sheet is 255 and is not what the page is
+  made of, so the maximum would put the line highest on exactly the photographs
+  that need it lowest. It is measured **locally**, over the crop rather than the
+  sheet, which is also what makes it survive a shadow gradient across the page.
+  On a clean screenshot it lands within a few levels of the old 190, so nothing
+  about the screenshot path changes; a region it cannot read falls back to
+  `INK_DEFAULT`, which IS the old 190.
+- **A band is prose on FIVE counts now, and the last two are what stop a table
+  or a graph being eaten a row at a time.** `MAXRUN_FRAC`: every scanline
+  through print crosses letters, so the longest unbroken run of ink in a line is
+  a few pixels — while an axis, a table border, a leader line or the top of a
+  rectangle lays a run right across the band. **Density alone cannot see that**:
+  a hairline rule across a wide crop is a fraction of a percent of its row's
+  pixels, so the old "not solid" test passed it happily and the top came off the
+  table. `RUNS_MIN`: a line of print breaks into dozens of separate runs, a
+  stroke or a blob into one or two.
+- **A FRAMED TABLE is not trimmed at all.** `RULE_GROUPS` full-width rules in
+  one crop is a ruled table, whose every row is short, wide and full of letters —
+  prose on every count that reads a row on its own, and trimmed row by row it
+  comes back as its own bottom two thirds, which is the one wrong crop that
+  looks completely convincing. **Four rules and not three**: an ordinary boxed
+  diagram is a rule top, a rule bottom and a divider across the middle, and at
+  three this would stand down on half the figures it was written to clean.
+- **A RUN OF CONSECUTIVE LINES goes together.** Two lines of a question sit a few
+  pixels apart, far less than the clear band that separates the wording from the
+  figure — so insisting on clear paper after the FIRST line finds none, stops,
+  and leaves both lines on the picture. The cut is remembered only where a run
+  reached real whitespace, so a band with nothing but figure after it is still
+  never touched.
+- **AND THEN THE BLANK PAPER ITSELF** — `_trimBlankEdges`, below, which is the
+  ONE place that pull-in happens now. `_trimEdgeTextLines` used to carry a
+  vertical-only copy of it at its foot; that is gone, so a sentence trimmed off
+  the top and the empty paper it exposes are removed by two functions that
+  cannot disagree about what ink is.
+- **`_aiRefineCrop` is unchanged and still runs on top.** These passes are free,
+  instant and deterministic; the AI pass costs a call per figure and catches what
+  pixels cannot. Neither replaces the other.
+
+### 📐 …and the LEFT and RIGHT edges, which were never pulled in at all (v1.359.0)
+
+`_trimBlankEdges(ctx, W, H, r, thr, axes)` / `EDGE_INK_MIN` / `EDGE_INK_FRAC` /
+`EDGE_SPECK_RUN`, and the `'x'` → `_trimEdgeTextLines` → `'xy'` order inside
+`_cropBoxFromScreenshot`.
+
+**The pull-in was vertical only**, buried at the foot of `_trimEdgeTextLines`,
+so `r.x` and `r.w` were never touched by any pixel pass. What reached the
+question was therefore the model's own rectangle plus a 2.8%-of-page margin
+plus however far `_expandRectToWhitespace` had grown it sideways — a figure
+sitting in the middle of a band of paper on every crop in the app, and nothing
+on any screen to say the passes had only done half their job.
+
+- **IT IS THE ONE MOVE HERE THAT CANNOT BE WRONG**, which is why it is allowed
+  all four edges: it removes measured empty paper and nothing else. It is also
+  what `_expandRectToWhitespace` structurally cannot do, because that one only
+  ever GROWS.
+- **A SPECK IS NOT INK, and this is the guard that makes it work at all.** JPEG
+  ringing, a dust mote and a scanner's edge noise put one or two dark pixels in
+  an otherwise empty row — and a single-pixel test then finds ink on the very
+  first row it looks at and the whole pull-in silently does nothing, on exactly
+  the photographs it was written for. A row is real when it holds
+  `EDGE_INK_MIN` (or `EDGE_INK_FRAC` of its span, whichever is larger) inked
+  pixels **AND** a run of at least `EDGE_SPECK_RUN` touching. **Both halves are
+  needed and they do different jobs**: three scattered pixels are noise however
+  many there are, and two touching pixels are a stroke however few.
+  `EDGE_SPECK_RUN` is 2 rather than 3 because a 1px hairline rule is real ink
+  and must survive.
+- **A REGION WITH NO INK ANYWHERE COMES BACK `null`, never a white rectangle.**
+  The rectangle landed on blank paper — it is not a figure, so the caller
+  returns null and falls back to the whole page, which is one ✂️ crop away from
+  right. Cropping the paper instead would file a blank picture that looks
+  exactly like a figure nobody has got round to cropping.
+- **THE SIDES ARE PULLED IN FIRST, BEFORE THE SENTENCE TRIM** (`axes: 'x'`),
+  and that ordering is the reason the argument exists at all. Every fraction
+  `_trimEdgeTextLines` measures — `MAXRUN_FRAC`, `RULE_FRAC`, the density and
+  the solidity gate — is *of the crop's width*, so a band measured against the
+  blank paper beside the figure reads as thinner and sparser than it is, and a
+  line of question wording slips under the prose test. With the sides in first
+  those fractions describe the FIGURE. Then the trim runs, then `'xy'` takes
+  every edge including the paper the trim has just exposed.
+- **It never eats into the figure**: ink on an edge stops the walk there, and a
+  result under 8px on an axis is refused rather than collapsing the crop.
+- **A tainted canvas, or a box under 16px, is handed back UNCHANGED.**
+  `getImageData` throwing is not a reason to stop cropping.
+- Run **`node tools/crop-tighten-tests.mjs`** after touching any of it.
+
+### 🔢 Picture answer options are ONE picture
+
+`_rectangleRules()` said, flatly, to EXCLUDE the answer options from every
+rectangle — right when the options are words, and the reason a question whose
+four choices are little DRAWINGS came out of Rapid add with its choices missing
+altogether. The rule now has two cases, and the picture case asks for **ONE
+rectangle round all four together** with their (1) (2) (3) (4) labels. Four
+separate rectangles would lose the row they were printed in, come out at four
+different sizes, and stop reading as a set of choices — a student answering
+"(3)" cannot see which one (3) was. It needs nothing downstream: it is one more
+ordinary `image` block, so `_autoFillDiagramsFromBoxes` crops it like any other.
+`polymathlc/scan` sends the same thing as a block wearing `role: 'options'`,
+because its viewer prints a word list underneath and has to know to stop.
+
+## 🧻 Clean paper — the faint diagonal weave on a printed diagram (v1.299.0)
+
+`PAPER_*` / `_paperWhitePoint` / `_paperCleanPixels` / `_paperCleanDataUrl` /
+`generateCleanEnhancedImage` (in `app.js`, search `CLEAN PAPER`), plus
+`annotCleanPaper` and its 🧻 button in the Touch up toolbar.
+
+**Where the stripes come from.** Nothing in this app draws them — there is no
+diagonal pattern in the print CSS, no watermark step, and nothing striped
+behind a transparent PNG. They are baked into the picture's own pixels, and
+they get there on the way IN: a question's diagram is passed through an image
+MODEL (`_BW_ENHANCE_PROMPT` — *"clean this scan up into a sharp black-and-white
+line diagram"*), and an image model has no notion of a flat, uniform white. It
+PAINTS the background like everything else, and its decoder leaves a faint
+regular weave — most often a diagonal hatch a few units off white. The prompt
+already forbids textures in as many words and the model still does it, because
+this is not the model choosing to add a texture: it is how the picture is
+reconstructed. **A prompt cannot fix it, which is why the fix is pixels.**
+
+It is invisible on screen at 300px and obvious on paper, which is why it turns
+up as a printing complaint: a laser printer has to halftone that near-white, so
+a 4-unit weave becomes a visible stripe across the whole figure.
+
+- **`_paperCleanPixels(px, w, h)` is the pass**: measure the paper's white point
+  and snap everything within `PAPER_TEX_DEPTH` of it to pure white. That is the
+  white-point clamp a scanner driver does, and it takes out the weave, a grey
+  scan background and a faint printed watermark alike — all three are the same
+  thing, near-white low-chroma pixels that are not the drawing. No AI: the same
+  picture must always come out the same way.
+- **The white point is the 98th PERCENTILE, never the maximum.** One blown-out
+  speck is 255 whatever the page really is, and on a grey scan that difference
+  is the whole pass.
+- **Three guards, and a refusal writes NOTHING.** The background has to be
+  bright (`PAPER_WHITE_MIN`), it has to be most of the picture (`PAPER_BG_MIN`),
+  and there has to be line work to protect (`PAPER_INK_MIN`). A photograph of an
+  experiment has bright areas and no line work, and flattening its highlights
+  into a plate is exactly the quiet damage the game-art cutters are so careful
+  about. Half-cleaning a picture is worse than leaving it alone, so the whole
+  pass is all-or-nothing.
+- **A pale wash of real COLOUR is part of the drawing** (`PAPER_TEX_CHROMA`) —
+  the blue of water in a beaker is bright and nothing like grey, and whitening
+  it deletes half of what the question is about. A deliberate grey shading sits
+  well below `PAPER_TEX_DEPTH` and is kept for the same reason.
+- **A hole stays a hole.** Transparent pixels are skipped and are left out of
+  the white-point measurement entirely, or a cut-out sprite comes back boxed.
+- **`generateCleanEnhancedImage` is the ONE door every diagram re-render goes
+  through** — the three `_BW_ENHANCE_PROMPT` sites (rapid add / the crop flow /
+  the whole-screenshot backup) and the ✨ Enhance / 🎨 Colourise button. A picture
+  cleaned on one authoring path and not on another is exactly the drift the
+  shared print helpers exist to prevent. It never throws: a picture that could
+  not be cleaned is handed back as it arrived.
+- **The two annot AI patches are deliberately NOT cleaned.** `annotSelAiFill`
+  and `annotAiRegen` return a patch that has to disappear into the picture
+  around it — `ANNOT_AI_KEEP` asks the model to MATCH the grain of a scan rather
+  than clean it up — so whitening its background would leave a bright rectangle
+  on a grey page.
+- **🧻 Clean paper is the manual twin, for pictures already in the bank.** Those
+  were re-rendered before the cleaner existed and carry the weave in their
+  stored pixels; nobody is going to reopen a thousand of them, but the one being
+  touched up anyway is a tap away. One history step, so ↶ Undo puts it back.
+  Every refusal is NAMED in the toast — "nothing happened" on a button is the
+  one outcome nobody can act on.
+- PNG in, PNG out. A JPEG step here would put its own texture back and flatten
+  any transparency to black.
+- Run **`node tools/paper-clean-tests.mjs`** after touching any of it.
+
+## 🔘 A printed MCQ has somewhere to write the answer (v1.298.0)
+
+`_printMcqBlockHtml` / `_printMcqAnswerBoxHtml` (in `app.js`, search `A printed
+MCQ needs somewhere to WRITE THE ANSWER`), plus the `.print-mcq-answer*` rules
+inside `index.html`'s `@media print` block.
+
+On screen an MCQ is answered by tapping an option, so nothing has to be written
+down — and the printed sheet inherited exactly that: four options, a radio
+circle beside each, and no answer box anywhere on the page. A student writes
+their choice in the margin, thirty students write it in thirty different
+places, and the teacher marking the pile has nowhere to look. Every past paper
+this app READS prints the bracket; the worksheets it printed did not.
+
+- **`_printMcqBlockHtml(block, part)` is the ONE place a printed MCQ is built**,
+  and BOTH print paths call it through an explicit `case 'mcq'` —
+  `doPrintWorksheetOpen` and `buildWorksheetHtml`. Those two switches had
+  already drifted apart once over the answer KEY (path A keyed MCQs, path B did
+  not), and a shared function is the only thing that stops the same thing
+  happening to the sheet itself. The drift is silent: the box appears on a
+  worksheet printed from the bank and not on the same worksheet printed from
+  📄 My Worksheets.
+- **Taking the MCQ out of the `default` branch takes it away from
+  `_pushBlockAnswerKey`**, which is called there. Both new cases push it
+  explicitly, or a mostly-MCQ paper goes back to printing a key that silently
+  skips most of its questions — which is the exact bug v1.284.0 fixed.
+- **An MCQ with NO options gets no box.** There is nothing to choose, so there
+  is nothing to write: a box there is a mark the student can never earn, and an
+  empty bracket under a blank question reads as a printing fault. Same rule as
+  `syStudentHtml` refusing a block with nothing given.
+- **The part letter is printed ON the box** (*Answer (b):*), from the same
+  `qPartOf` map the rest of the page reads, so the label on the box and the
+  label on the key cannot disagree. A question with parts prints three of these
+  down one sheet, and three identical unlabelled boxes is exactly the confusion
+  parts exist to prevent.
+- **`renderImportedBlockStudent` is untouched.** It is shared with practice, and
+  a bracket rendered there would put an empty box under every MCQ a student
+  answers by tapping.
+- The box is **one line and right-aligned**, and that is deliberate: a tall
+  bordered box on this sheet already means an open-ended writing box
+  (`.print-open-answer-box`), and a printed MCQ must not look like it wants a
+  sentence. It carries `break-inside: avoid` so it is never stranded at the top
+  of the next sheet away from the options it belongs to.
+- The extra height is measured, not assumed — it goes through the print planner
+  like everything else (see **The print planner must MEASURE**), so the
+  two-compact-MCQs-per-page packing re-plans around it for free.
+- Run **`node tools/print-mcq-box-tests.mjs`** after touching any of it.
+
+## The clone stamp shows what it is about to stamp (vv1.294.0)
+
+`_annotClonePeekSrc` / `_annotUpdateClonePeek` / `ANNOT_PEEK_MIN` and the
+`#annotClonePeek` canvas inside `#annotBrushRing` (search `The clone stamp's
+live preview`).
+
+The source pin says where the copy comes FROM and the brush ring says how big
+the mark will be. Neither says what the mark will BE, so lining a stamp up
+meant clicking and then looking at what landed — and undoing it when it was
+half a letter out. **The ring is now filled with the patch that would be
+stamped this instant**: a lens on the source, carried under the pointer, at the
+same zoom as everything else.
+
+- **It lives INSIDE the ring**, so it is positioned, sized and hidden by exactly
+  the code that already does all three for the ring. `_annotUpdateBrushRing` is
+  still the ONE place either of them moves.
+- **The source point is different before and during a stroke, and getting that
+  backwards is the silent failure.** Before the first dab there is no offset, so
+  starting the drag here is what would put the source POINT under the pointer —
+  the preview is centred on `cloneSrc`. Mid-stroke the offset was locked in at
+  pointer-down, so it is `(pointer in image px) − cloneOff`, which drifts away
+  from the mark at the speed of the hand if it is computed the other way round.
+- **`_annot.ptr` is in STAGE coordinates and the source is in IMAGE pixels**, so
+  zoom and pan come off first. Read it raw and the preview is right only at 100%
+  with no panning — which is how the editor opens, and therefore how anyone
+  would check it by hand.
+- **Mid-stroke it reads `cloneSnap`, not the live canvas** — the stamp reads the
+  frozen snapshot, so dragging back over ground already covered would otherwise
+  preview the copy instead of the source, and the two diverge exactly where it
+  matters.
+- The backing store is the brush in **image** pixels, so the preview is
+  pixel-for-pixel what the dab puts down however far the view is zoomed; under
+  `ANNOT_PEEK_MIN` (14) screen px there is nothing to see in the ring and it is
+  not drawn. The ring goes white-on-black while it is previewing — a black
+  hairline over arbitrary artwork is the one thing that disappears.
+- Run **`node tools/clone-preview-tests.mjs`** after touching any of it.
+
+## ✨ Regenerate — say what you want and the AI redraws it (vv1.294.0)
+
+`annotAiRegen` / `_annotAiBarInit` / `_annotAiSyncScope` / `_annotSelBox` /
+`ANNOT_AI_KEEP` (search `REGENERATE`), plus the `#annotAiBar` under the
+selection bar in the Touch up editor.
+
+AI content-aware fill answers exactly ONE question — *take this out* — with a
+prompt nobody can change. Everything else an author actually wants of a picture
+("rub out the pencil marks", "make the arrow red", "redraw this beaker
+cleanly", "put the missing axis label back") had **no door at all**. This is
+that door: a line to type in, and the same image model behind it.
+
+- **TWO SCOPES, and the difference between them is the whole safety story.**
+  With an area SELECTED only that area may change: the model is shown the
+  picture with the area **RINGED rather than blanked** — "make the arrow red"
+  needs the arrow still visible, which is exactly what content-aware fill's
+  magenta blanking destroys — and the reply is composited back through
+  `_annotWithSelClip`, so a model that quietly rewrote the whole page cannot
+  touch one pixel outside the selection. With NOTHING selected the whole picture
+  is redrawn, which is the honest reading of "no area chosen".
+- **The bar NAMES the scope it is about to use** (`_annotAiSyncScope`, kicked
+  from `_annotSelSyncBar`), because those two are very different things to press
+  a button on.
+- **The magenta marker is drawn just OUTSIDE the selection**, so it never covers
+  the content the instruction is about — and anything of it that survives into
+  the reply is outside the clip and therefore cannot be composited back.
+- **It is ONE history step either way**, so ↶ Undo puts the original back. That
+  is what makes an experimental prompt cheap enough to actually experiment with.
+- The whole-picture branch **clears the canvas and draws**, never a `'copy'`
+  composite: a canvas stranded in a composite mode erases everything drawn
+  afterwards (the same trap `_annotResetCompose` exists for).
+- `_annotAiBarInit` runs on every open, so **last picture's instruction is never
+  left sitting in the box** one Enter away from being run on this one.
+
+## ✍️ AI complete — carry the paragraph on from where you stopped (v1.302.0)
+
+`completeBtnHtml` / `_aicTrimEcho` / `_aicJoin` / `_aicUnquote` / `_aicAppendInto`
+(search `✍️ AI COMPLETE`), plus the ✍️ **AI complete** button beside ✨ Improve
+and ✂️ Shorten on every prose box in the question editor. **All four portals
+carry the same block — keep them in step**; only the subject line of the prompt
+differs.
+
+An author half way through writing a passage, a model answer or an explanation
+had two AI buttons and both of them *rewrote what was there*. Neither is any
+use to somebody who has stopped mid-sentence and wants the rest — so the thing
+they actually wanted, they typed themselves.
+
+- **It only ever ADDS, and that guarantee is STRUCTURAL rather than something
+  the prompt asks for.** ✨ Improve and ✂️ Shorten hand their reply to a setter
+  that REPLACES the whole box; `_aicAppendInto` appends, and the existing markup
+  is never re-serialised. So nothing the model returns can change a word that is
+  already there — and the author's own bold, underline and pasted pictures
+  survive, which a plain-text round trip would flatten.
+- **`_aicTrimEcho` is the net, because the model restates before it continues.**
+  Asked to carry on, it very often repeats the last sentence first, and now and
+  then the WHOLE paragraph. Appended verbatim that puts the author's opening in
+  the box twice, which reads exactly like the button having mangled it. Whatever
+  of the existing text the reply opens with is cut — matched on
+  whitespace-folded, lower-cased text so a reply that reflows the spacing is
+  still caught, and **longest tail first**, or a shorter match leaves the rest of
+  the repeat behind.
+- **The other direction is the one that eats the work.** A trim firing on a
+  coincidental few characters throws the real continuation away, so
+  `AIC_ECHO_MIN` (10) is the floor below which an overlap is treated as
+  coincidence. Both directions are silent and the app works either way.
+- **`_aicJoin` never welds a space between two CJK characters.** 中文 and 华文 are
+  written without them, so a space there is a space in the middle of a word;
+  latin either side needs one, and a trailing space the author typed is not
+  doubled. It is in all four portals, not just the Chinese one — a 华文 name or
+  a quoted phrase turns up in any of them.
+- **execCommand is what makes it cheap to try**: it keeps the browser's own undo
+  stack, so ONE Ctrl+Z takes the whole completion back off again. The caret is
+  moved to the END of the box first — appending at the caret (which is what
+  🎤 Dictate does) would drop a completion into the middle of a sentence.
+- **An empty box is refused.** Writing from nothing is a generated question,
+  which is a different job and a different button; this one carries on from what
+  is there.
+- **The model is told to finish ASKING a question, never to answer it** — a stem
+  the author is still writing must not come back with its own answer appended.
+- **It shares `.improve-btn` for its looks, so ✨ Improve's handler needs a
+  guard.** Improve is the one that runs on the bare class; without
+  `contains('complete-btn') return` one press runs BOTH, and Improve rewrites the
+  box — the exact damage this button promises never to do, delivered by the
+  button itself. ✂️ Shorten has carried the same guard from the start.
+- Run **`node tools/ai-complete-tests.mjs`** after touching any of it.
+
+## 🔎 Why not this one — the ⓘ on a marked MCQ's wrong options (v1.303.0)
+
+`wny*` (in `app.js`, search `WHY NOT THIS ONE`), plus `_mcqPaintResult`, the
+`.wny-*` / `#wnyPop` CSS in `index.html`, and the ⓘ **Why the other options are
+wrong** switch on all four print surfaces — the worksheet builder, the 📄 My
+Worksheets card, the 🖨 print picker and the past-papers toolbar.
+
+Being told **✗ incorrect, the answer is 2** teaches nothing. On an MCQ-only
+question it is *all* a student is told — `_genAndShowExplanation` writes an
+A.I. Explanation only when the question has an OPEN part — so a whole paper of
+multiple choice ends at a red border and a green one. Now every option they did
+not get right grows an ⓘ, and it says why *that* one is wrong against the
+evidence actually printed in the question: *"There are only 2 populations of
+producer — arrowhead and water lily — so 3 is wrong."*
+
+- **IT IS A VISION CALL, and that is not an optimisation waiting to happen.** A
+  science distractor is almost always wrong because of what a food web, a
+  circuit, a table or a graph SHOWS. "Only 2 producers" cannot be said from the
+  wording alone, and a reason that does not point at the evidence is the "this
+  is incorrect" the student already had. `_cqMedia` attaches the diagrams and
+  `_cqRepr` spells the tables out — both borrowed from ✅ Check Questions rather
+  than forked, and for the same reason that page's AI pass may not be
+  downgraded to `askGemini` either.
+- **It arms only AFTER marking, from `_mcqPaintResult`.** That painter is new:
+  all three marking paths — whole-question marking, the local per-part mark and
+  the AI per-part mark — carried their own copy of the colouring loop, which is
+  exactly how the ⓘ would have ended up on two surfaces out of three and
+  mysteriously missing on the third. Armed a moment earlier it is an **answer
+  key**: the badges go on the WRONG options, so before marking they would point
+  straight at the right one. `resetOpenAnswersIn` disarms for the same reason —
+  a reset question that kept them is an open-book retry.
+- **The badge is on the wrong options only.** The right one is already painted
+  green with the answer beside it; an ⓘ there would be a second way of saying
+  the same thing, on the one option that needs no defending.
+- **ONE call covers the WHOLE option list.** The model has to see the four
+  together to say why this one beats that one, and the student reads two or
+  three in a row.
+- **A reason is placed against an option by the option's OWN number** and
+  nothing else (`_wnyNormItems`, through the shared `_normMcqChoice`, so "(2)",
+  "2." and "B" all land on option 2). This is the one failure the feature
+  produces silently: a reason shown under the wrong option reads perfectly and
+  teaches a child something untrue about a question they have just got wrong.
+  Positional order is the fallback and **only** when the model numbered nothing
+  at all and returned exactly one entry per option.
+- **`_wnyUsable` refuses a question with no correct option ticked.** "Why is
+  this one wrong" has no answer when nothing is recorded as right, and a badge
+  that cannot keep its promise is worse than no badge. That gap is an authoring
+  fault, and ✅ Check Questions is where it gets found.
+- **`_wnyOpts` is the ONE normaliser, and it is what keeps the two surfaces
+  honest.** The marking store carries `.letter`/`.correct` per option; a raw
+  block carries `options[]` plus a separate `correctId`. Both go through it, so
+  the prompt — and therefore the cache key — is the same string either way: a
+  student's hover and a teacher's printed key are the same sentences, and the
+  print does not re-bill what the hover already paid for.
+
+### …and the same reasons on the printed key
+
+- **`wnyPrepare` is the pre-pass**, run BEFORE the sheet is built: the notes
+  have to be in hand when the answer key is assembled, and the planner measures
+  the finished page, so a note arriving afterwards would not be counted in the
+  page it has to fit on.
+- **It is OFF by default and says what it costs** — one AI call per
+  multiple-choice question, `WNY_PRINT_PAR` at a time, on the progress bar the
+  print already owns. They are cached by prompt, so re-printing the same paper
+  in the same sitting is free.
+- **Nothing is written anywhere.** The notes live in memory and in
+  `sessionStorage`; no path here touches the bank. A question whose call fails
+  simply prints without its notes — a printed key quietly carrying a WRONG
+  reason would be far worse than one carrying none.
+- **`_pushBlockAnswerKey(sections, block, part, why)` is where the rows are
+  built**, threaded through that ONE pusher rather than added to each print
+  path's own switch. Those two switches had already drifted over the MCQ answer
+  itself once (v1.284.0); a key that carries the reasons from one print button
+  and not the other is that same fault wearing a new hat.
+- **The correct option is never listed among the reasons it is not the answer**,
+  and the section is only ever pushed BESIDE a real answer — these are teaching
+  notes, and offering them where the key cannot even name the answer would be
+  the wrong way up.
+- **The live A4 preview shows the notes it ALREADY has and never fires a call**
+  (`_wnyCachedNotes`). It is redrawn on every page-break click, and one AI call
+  per MCQ on each of those is not a preview, it is a bill. The divergence from
+  the printed sheet is confined to the answer key's own pages at the back: the
+  breaks the teacher is arranging are on the QUESTION chunks, and these notes
+  never touch one.
+- **`WNY_SWITCHES` names the checkbox for each surface and an unknown surface
+  returns false.** A default that fell through to another page's checkbox would
+  honour a switch the teacher set somewhere else, on a print they started from
+  here, with nothing on the screen able to explain it. The past-papers toolbar
+  is rebuilt on every data change, so its box carries its own state across the
+  re-render or a tick set a moment ago is silently undone.
+- Run **`node tools/why-not-tests.mjs`** after touching any of it.
+
+## 🖼 Auto diagram — the answer key drawn, not just written (v1.304.0)
+
+`akd*` (search `AUTO DIAGRAM`), plus the `.akd-*` CSS in `index.html`, the bar
+on the question's 📝 **Answer-key explanation & picture** panel and the same bar
+inside every 🔑 `answerKey` block.
+
+An answer key says what the answer IS. A diagram says why — the beaker with the
+arrows on it, the four stages labelled, the circuit with the break marked. A
+teacher draws one on the whiteboard every lesson and it never reaches the
+printed key, because drawing it properly takes half an hour.
+
+🖼 **Auto diagram** reads the question AND its answer and draws one, into the
+answer-key picture slot that already exists — so it prints on the key, beside
+the answer, with no other plumbing.
+
+- **THE LABELS ARE THE PART TO CHECK, and the app says so out loud.** An image
+  model draws a beaker perfectly and then letters it "watr vapuor" — the same
+  weakness `TCG_BANNED_PROMPT_RE` exists for elsewhere in this file. That is not
+  a reason to skip the labels (an unlabelled science diagram explains nothing);
+  it is the reason ✏️ **Touch up** sits on the same row, and why every toast
+  that finishes a generation says to check them.
+- **It is drawn for PAPER.** The key is printed and photocopied, so
+  `AKD_PRINT_RULES` — the ONE place the style is stated, shared by the first
+  draw and every regeneration — asks for black line-work on plain white, one
+  idea, few large elements, colour only where it carries meaning, and labels of
+  1–3 words. No title in the picture: that is the thing that always comes out
+  as gibberish.
+- **`generateImageDataUrlGemini` takes exactly ONE reference picture**, so which
+  one it is decides what the button does. Drawing fresh passes the QUESTION's
+  own figure, so the answer diagram shows the apparatus the student was looking
+  at rather than a stock drawing of a different one — and the prompt has to say
+  in as many words that it is *not* the thing to hand back, or the model returns
+  it unchanged. 🔄 **Regenerate** passes the CURRENT diagram instead, so "make
+  the arrows red" edits that picture. Two buttons, because they are two
+  different intentions and one would always be the wrong one.
+- **The instructions box outranks the rest of the prompt**, is clipped to
+  `AKD_NOTE_MAX`, and is REMEMBERED — on the block for a 🔑 block
+  (`block.diagramNote`), and on the question for the panel
+  (`q.answerKeyDiagramNote`, which therefore has to be in
+  `EDITOR_OWNED_QUESTION_FIELDS` or `carryOverQuestionMeta` restores a note the
+  author just cleared).
+- **`_akdMake` is the ONE generator** both surfaces call. Two would be two
+  prompts to improve and two to keep in step.
+- **The result goes through `_paperCleanDataUrl`**, the same pass an enhanced
+  scan takes: an image model has no flat white, so it leaves the faint weave
+  that prints as a grey wash. It returns `{ url, report }`, not a bare url, and
+  a refusal hands the picture back untouched.
+- **Drawing over a picture that is already there asks first; regenerating does
+  not** — 🔄 *is* the redraw the confirm would be offering.
+- **Nothing is written until the question is saved.** The diagram is uploaded to
+  Storage (it must be, to have a URL) and the URL goes into the editor's own
+  field, exactly where 🖼 Upload answer-key image puts one.
+- Run **`node tools/auto-diagram-tests.mjs`** after touching any of it.
+
+## 🎨 Photo Editor — the touch-up tool on its own (v1.304.0)
+
+`pe*` / `annotDownloadPng` (search `PHOTO EDITOR`), plus `#page-photoedit`, its
+`admin-only` nav item and the `.pe-*` CSS. Admin only.
+
+The touch-up editor already does erase, paint, fill, clone, history brush,
+select / lasso / wand, move, resize, rotate, skew, straighten, line, text,
+paste-in, AI content-aware fill and ✨ Regenerate. Everywhere else it is reached
+THROUGH something and writes back to that thing. This page is the same editor
+with nothing behind it: bring a picture in, edit it, take a PNG away.
+
+- **It is the SAME editor, not a copy.** `_annotOpenSrc` already takes a
+  `target` saying where ✓ Apply writes back to; this adds one more kind
+  (`standalone`) and one branch in `applyAnnotTool`. A second editor would be a
+  second editor to fix every bug in — and it is what the CER app's ✏️ Touch up
+  rule has said since v1.278.0: add a destination by adding a branch, never by
+  forking the tool.
+- **Admin-only in TWO places.** The nav item carries `admin-only`, `photoedit`
+  is not on `EMPLOYEE_PAGES`, and `navigateTo` sends anyone else away. Hiding a
+  nav item is not a lock.
+- **Three ways in, one door.** Paste, drop and the file picker all end at
+  `_peOpen`. The picker's `value` is cleared BEFORE the read, or the same
+  picture chosen twice fires no `change` and the second attempt does nothing.
+- **The page's paste stands down while the editor is open**, because in there
+  Ctrl+V means something else and equally wanted: it drops a picture ONTO the
+  one being edited.
+- **⬇️ Download PNG is on EVERY target**, not just this page — a diagram worth
+  keeping outside the app is one click, and it never leaves the editor. PNG end
+  to end, so anything cut out to transparent stays transparent.
+- **A picture scaled down on the way in SAYS SO.** The canvas is capped
+  (`ANNOT_MAX_PX`, and `ANNOT_MAX_PX_STANDALONE` here) because ten full-frame
+  undo snapshots sit behind it. A downloaded file quietly smaller than what went
+  in is the one thing a picture editor must never do without saying so.
+- **Erasing CUTS here** (`eraseTo`), as it does on a game art slot: a scanned
+  question is paper, and a picture on its way to a PNG is not.
+- **Nothing is uploaded and nothing is saved.** ✓ Done *is* the download, and
+  that branch returns before any upload the other targets do.
+- Run **`node tools/auto-diagram-tests.mjs`** after touching any of it.
+
+## ⏳ Still loading — the bar on a question whose pictures have not arrived (v1.305.0)
+
+`imgWait*` / `_imgWait*` / `IMG_WAIT_*` (in `app.js`, search `STILL LOADING`),
+plus the `.imgwait-*` CSS in `index.html`. Emitted at the top of every question
+body by `buildOpenBody`.
+
+A question is text and pictures, and the text lands first. On a slow school
+connection a diagram can take twenty seconds, and until it does the student is
+looking at a question with a gap where the thing they need is meant to be —
+with nothing on screen saying the gap is temporary. They answer around it, give
+up on the question, or reload and start the wait again. All three are the app's
+fault, not theirs.
+
+- **The bar is HONEST.** The fill is `loaded / total`, counted from the real
+  `<img>` elements — never a timer pretending to be progress. What a timer *can*
+  say is that something is still happening, so the TRACK carries a moving stripe
+  while anything is outstanding: it never looks frozen at 0 of 1 and it never
+  claims progress it has not made. Keep those two separate if you touch it.
+- **`buildOpenBody` is the ONE hook**, because it is the one renderer every
+  practice surface goes through — practice, quick practice, topical, the student
+  view, the worksheet preview, Snap & Mark, Ai-nstein's quiz. Ten call sites,
+  one bar. `_scheduleImgWait` mirrors `_scheduleAnnotInit` exactly (rAF plus an
+  80ms fallback), because the body has to be in the DOM before its pictures can
+  be found.
+- **It only appears when there is a wait.** `IMG_WAIT_GRACE` is a beat before it
+  is drawn at all — a cached picture is there in 20ms, and flashing a loading
+  bar on every question is worse than the problem it fixes.
+- **An ERROR is an END, and `_imgWaitDone` checks that flag FIRST.**
+  `handleImgError` replaces a picture that failed twice with a "could not be
+  loaded" box, and the detached element it leaves behind can sit at
+  `complete === false` for ever. A bar waiting on that is exactly the frozen bar
+  this exists to prevent. The `load` listener is deliberately NOT `{once:true}`:
+  `handleImgError` retries once with a cache-buster, so a load can follow an
+  error and clear the flag again.
+- **`data:` pictures and an `<img>` with no `src` are never waited on** — the
+  first is already here, the second is a placeholder, and both would wait for
+  ever.
+- **Past `IMG_WAIT_SLOW` the wording changes and a Retry appears**, which
+  re-requests only the pictures still out, cache-busted (the same move
+  `handleImgError` makes on a failure) and restarts the clock.
+- **One watcher per surface**, keyed by container selector exactly as
+  `_openItemsStore` is, and `resetOpenAnswersIn` stops it — a re-render would
+  otherwise leave a second watcher counting the same pictures.
+- `role="status" aria-live="polite"`, and both animations are dropped under
+  `prefers-reduced-motion`.
+- Run **`node tools/auto-diagram-tests.mjs`** after touching any of it.
+
+### 🖼 What the auto diagram IS — and what it is not (v1.305.0)
+
+It is an **optional teaching picture for the answer key**. It explains the
+answer; it is not part of the question, and it never asks a student to draw or
+upload anything. A question students annotate is `q.annotation` — a separate
+flag with its own pads, its own `answerImg` model answer and its own AI check.
+Nothing in `akd*` touches either.
+
+- **The one place it reaches a student is `showExplanation`**, the ONE builder
+  of the post-marking cards, so it appears beside ✅ Model answer and only once
+  the question has been marked. Shown any earlier it would be the answer,
+  printed above the question. `_qAnswerDiagrams(q)` is the ONE reader — the
+  question's own `answerKeyImage` plus every 🔑 `answerKey` block's `url`,
+  deduped — and it is called from that card and nowhere else.
+- A 🔑 `answerKey` block still renders as **nothing** inside the question
+  (`renderImportedBlockStudent` returns `''`). That is what keeps the words of
+  an answer key out of the question while the picture is revealed afterwards.
+- The editor says all of this in as many words, because the panel sits directly
+  under the ✍️ Annotation question checkbox and the two are easy to confuse.
+
+## 🎯 The siege squad — three per role, chosen before the gate opens (v1.308.0)
+
+`EMS_SQUAD_PER_ROLE` / `emsSquadClean` / `emsSquadDefault` / `emsSquadSaved` /
+`emsSquadStore` / `emsOpenSquad` / `emsLaunch` (search `CHOOSING A SQUAD`), plus
+the `.ems-pick-*` CSS in `index.html` and `siege.squad` on the save.
+
+A collection past 150 monsters turned the deck column into a scroll: six
+shelves, forty tiles on some of them, and a wave walking on the gate while the
+student hunts for the healer they meant to summon. Shelving by role was the
+first half of that fix; this is the second — **a run is fought with a SQUAD
+chosen before it starts**, at most three from each role, so the deck is a dozen
+tiles that all fit without scrolling.
+
+- **It is a FILTER on the deck and nothing else.** Every monster is still owned,
+  still levels, still fights in the Arena, the Dungeon, a duel and Legends. What
+  the squad decides is which of them are on the bench for this siege.
+- **The cap is PER ROLE, never a flat total.** "Three of each" is a line-up a
+  student can reason about; a flat eighteen is the same hunt with a shorter
+  list, and it lets somebody field eighteen attackers and no healer — which is
+  the mess this exists to end, wearing a tidier heading.
+- **`emsSquadClean` is the ONE place the cap and the ownership test are
+  applied**, and every read goes through it: the saved squad, the pick screen's
+  ⚔️ Start, and the run itself. A card merged away, sold, or carried in from
+  another account's save drops out rather than sitting on the bench as a tile
+  that costs mana and summons nothing.
+- **A squad is never EMPTY.** The deck column is the only way to summon
+  anything, so an empty one is a game that renders perfectly and cannot be
+  played. `emsSquadDefault` fields the best three of every role (by
+  `tcgCardPower`, so BOTH progression tracks count), `emsSquadSaved` falls back
+  to it, and `emsRenderDeck` falls back to it again.
+- **The squad is REMEMBERED** on `siege.squad`, so a student who has settled on
+  a line-up is not made to re-pick it every run. `tcgHydrateState` is a
+  **WHITELIST**, so that field has to stay in its `siege` literal or it is
+  dropped on the next load — and it validates OWNERSHIP only: the per-role cap
+  is applied on the way out, because the `EMS_*` constants sit far below the
+  hydrator and reading one from up there is the temporal-dead-zone trap this
+  file documents elsewhere.
+- **The pick screen is its own overlay, shown BEFORE the battlefield exists.**
+  The field, the FX preload and the wave timer all start on ⚔️ Start
+  (`emsLaunch`, which is the old `emsOpen` body), so nothing is running behind a
+  student who is still choosing.
+- **A full role REFUSES a fourth rather than swapping one out.** Which of the
+  three to drop is the student's decision, and a silent replacement takes a
+  monster off the bench they never asked to lose.
+- It reuses the deck column's own tiles (`.ems-role` / `.ems-role-grid` /
+  `.ems-card`) rather than forking a second set, so a monster looks the same
+  being chosen as it does being summoned — and it carries the same 👁, which is
+  how a student reads what a monster does in the Siege before committing to it.
+- ↻ **Play again** keeps the squad (it is the same fight); 🎴 **Change squad** on
+  the result card goes back to the picker, because a siege that just fell is
+  exactly when a student knows what they wanted instead.
+- **`polymathlc/math` carries the same block** for 🌋 Orbital Siege — keep the
+  two in step.
+- Run **`node tools/siege-squad-tests.mjs`** after touching any of it.
+
+## 🗑 Deleting a question from ✅ Check Questions (v1.308.0)
+
+`cqDelete` / `cqUndo` / `_cqDeleted` (search `🗑 Delete the question on show`),
+plus the `.cq-del` rule in `index.html`.
+
+The queue served a bad question back and offered ✓, ✏️ and ⏭ — so the only way
+to get rid of one was to leave the page, find it in the bank, and delete it
+there. In practice it got skipped instead, and came back round on the next pass.
+
+- **It ASKS first, and that is the one place this button differs from the same
+  button in the English and Chinese portals.** Those move a question to a bin
+  that holds it for a week; **this app has no bin** — `deleteQuestionDoc` is the
+  same permanent delete the bank card and the Question Doctor use. So the safety
+  net here is the confirm plus a WHOLE deep copy of the question kept in memory,
+  and the dialog says exactly that rather than promising a week that does not
+  exist.
+- **↩ Undo covers the deletion, newest first**, and it SAYS which of the two it
+  is about to undo — "↩ Undo" over a deletion the author has forgotten about is
+  how the wrong thing gets put back. A restored question comes back
+  **unchecked**, and the queue is put back on it rather than leaving it to
+  surface again whenever the queue is next rebuilt.
+- The copy is taken **before** anything is removed and it is a DEEP one: the
+  entry in `questionBank` is the only object holding that question.
+- Run **`node tools/check-questions-tests.mjs`** after touching the page.
+
+## 🩷 The pink wall — keying a screen off art nobody generated here (v1.307.0)
+
+`_tcgScreenCut` / `_tcgTryScreens` / `_screenSubjectKept` / `_tcgCutBackdrop` and
+the display layer `_tcgLiveIndex` / `_tcgLiveClean` / `_tcgLiveImg` /
+`tcgKeyArtImgs` / `_tcgLiveWatch` / `tcgLiveRefresh` (search `THE PINK WALL`),
+plus `TCG_SCREEN_EDGES_MIN` / `TCG_SCREEN_RING_SEEN_MIN` /
+`TCG_SCREEN_SUBJECT_MIN` in the chroma keyer.
+
+`_tcgGenClean` keys the chroma screen because it KNOWS which one it briefed. A
+picture arriving ANY other way — pasted, dropped, uploaded, or installed from
+the bundled asset set — carries no such note, and got the flood-fill knock-out
+and nothing else. The knock-out is deliberately cautious and hands back what it
+cannot cut safely, so **201 battle avatars and 5 hero portraits went into the
+game standing on a bright magenta, green or blue studio wall**, on every game
+surface, for every student.
+
+- **`_tcgSlotStandsOnNothing` is now the ONE list**, read by `_tcgArtStore`,
+  `_tcgBgFreeIds`, the 🧼 button and the display index. It was written out three
+  times, each copy free to drift from the others.
+- **`_tcgCutBackdrop` is the ONE cut** a picture from outside the generator
+  gets: chroma FIRST, then the flood fill. Chroma is a fact about COLOUR, so it
+  reaches a wall seen through a gap between a monster's legs for the same reason
+  it reaches the corners, and it can never walk into the artwork through a join.
+- **`_recleanStoredArt` tries it first too**, so one press of 🧽 makes it
+  permanent for art already in the map. **Generated art never comes here** —
+  `_tcgGenClean` has a redraw available and keeps the strict key, unchanged.
+
+### Three rules had to change, and each was a real picture failing
+
+- **`TCG_SCREEN_EDGES_MIN` (3) — a figure STANDING on the bottom of its frame.**
+  A hero portrait is a person from the knees up: top and both sides are 100%
+  screen and the bottom edge is boots, so the whole-ring test landed near 80%
+  and refused all five. Three WHOLE clean edges is stronger evidence of a studio
+  wall than the ring test it stands in for, not weaker — a picture that merely
+  CONTAINS the hue cannot have three complete frame edges of it. **Two is not
+  three**: a subject wedged into a corner leaves two clean edges and is not a
+  wall, and the harness pins that.
+- **`TCG_SCREEN_RING_SEEN_MIN` — an empty border pixel is not evidence.** It
+  used to count as PROOF of a wall, so a picture that is ALREADY a clean cut-out
+  had a "100% screen" border by definition: any sprite with enough of a screen
+  hue in its own paint then passed every precondition and was keyed. That is how
+  an already-transparent blue dragon came back full of holes. `_tcgPlateColour`
+  carries the same correction, and for the same reason.
+- **`TCG_SCREEN_SUBJECT_MIN` (0.72) — the guard the hue keyer never had, and the
+  one that matters most.** `_screenDn` asks "is this pixel that HUE", so a
+  **violet monster shot on a MAGENTA wall scores as wall and is eaten alive**.
+  The bundled set is full of them: every psychic, shadow and cosmic card was shot
+  on magenta although `tcgScreenForElement` routes exactly those elements to a
+  GREEN screen for this reason. A half-dissolved sprite is far worse than a
+  visible wall, because nothing on screen says it happened.
+  - `_screenSubjectKept` measures it against the WALL — screen colour reachable
+    from the frame edge — not against the whole picture, so the number means the
+    same thing on a sprite standing in a 70% wall and on one that fills its
+    frame.
+  - 0.72 is read off the 206 bundled pictures: an undamaged broad-hue cut leaves
+    73-100% of the subject and everything below about 70% is visibly eaten.
+    **Refusing that broad cut is the right answer.** The committed build keyer
+    can then sample the screen's actual border RGB and keep the largest connected
+    subject; the live/runtime keyer still refuses because it has neither a
+    reviewable contact sheet nor git as a reversible source of truth.
+  - **The same guard is what `tools/key-realm-sprites.mjs` was missing**, and
+    the build tool had already shipped four hollowed sprites into the repo
+    before it got one. See its house rule below.
+  - The flood-fill knock-out cannot rescue those sprites (correctly — a violet
+    body is a small colour step from a magenta wall). The build-only sampled-RGB
+    fallback can: it follows soft spill only from the border, removes exact
+    plate RGB inside gaps, and keeps the main connected painted component.
+
+### Two passes, and which one a picture takes is the whole safety story
+
+Pass 1 is the **strict** key, untouched: enclosed screen colour is read as the
+model having painted the wall's colour ONTO the subject, and the key is refused.
+Pass 2 runs the SAME key with that guard off, and **only ever on a picture pass
+1 has already refused** — one that was otherwise going to keep its wall.
+
+Pass 2 exists because the strict reading is wrong for a lot of real artwork: a
+fire ring, a water curl, a coiled serpent and a pair of wings all enclose real
+wall that never reaches the border, and the tighter the subject glows the less
+that trapped wall looks flat (measured: mean screen-ness 0.83–0.93 and a spread
+of 0.10–0.13, where clean wall is 0.99 and 0.00). **No threshold separates that
+from a gem painted in the wall's colour** — a limit this file has documented
+since v1.280.0, and a parameter sweep over the real set confirmed it: even at
+settings loose enough to break the adversarial cases, a third still refused. So
+pass 2 does not try to. It weighs the two outcomes, which are not symmetrical: a
+refusal costs a magenta square behind a sprite everywhere, for everyone, until
+somebody presses a button they do not know exists; a wrong key costs a hole in
+ONE sprite, which the admin can see and can undo with ✏️ Touch up or by
+uploading the picture again. Both passes are still verified by the two checks
+with no false positives — the wall really is gone (`_screenStillThere`) and the
+subject really did survive (`_screenSubjectKept`).
+
+### …and the art already in the map, with nobody pressing anything
+
+`_tcgArtStore` only cuts what it SAVES, so everything already filed keeps
+whatever backdrop it was stored with. The display layer cuts those out **FOR
+DISPLAY ONLY**, everywhere a student can see one. It writes nothing anywhere.
+
+- **`_tcgLiveWatch` is THE ONE HOOK.** Forty-odd surfaces render Realm of Embers
+  art — the arena, the duel board and its hand, the Siege field, the Legends
+  picker, the artifact chooser, the hero picker, the peek panel, the pack
+  reveal, the page header — and every one writes a plain `<img src>`. Tagging
+  each call site is how a surface added next month becomes the one that quietly
+  still shows the wall, so the DOM itself is watched: one MutationObserver,
+  bound once, covering every picture the app will ever paint. Setting `img.src`
+  from inside the callback re-enters it once with a url no longer in the index,
+  so there is no loop.
+- **It is keyed by the SLOT, through `_tcgLiveIndex`** — and a url serving BOTH
+  a stands-on-nothing slot and a scene slot is dropped rather than cut, because
+  `tcgArtUrl` falls back to the avatar and `tcgAvatarUrl` falls back to the card
+  art, so one picture can legitimately be doing both jobs and cutting it would
+  strip the painted scene off a card face.
+- **Already keyed once this session → swapped inside the observer's own
+  microtask**, before paint, so it is never seen wearing its wall. First sighting
+  → hidden while it is cut, and NEVER left hidden: an unkeyable picture, a
+  tainted canvas, a stalled decode and a thrown error all end with the picture
+  shown exactly as it arrived (`TCG_LIVE_WAIT_MS`).
+- **The admin's Card Art thumbnails are deliberately LEFT RAW** (`.ga-prev`) —
+  that panel is where a wall has to be visible, or nobody would know it is there.
+- The booster-pack overlay keeps `tcgKeyPackImgs` because the rip animation may
+  not start until every frame is up, but it goes through the SAME cache and
+  claims its frames with the same `dataset.rkey` flag, so the two never fight.
+- The cache is capped (`TCG_LIVE_CACHE_MAX`) — these are full data URLs, and a
+  session that browsed the whole dex would otherwise hold tens of megabytes.
+- Run **`node tools/pink-screen-tests.mjs`** after touching any of it.
+
+## 🔑 Keywords in a model answer, and 🔲 Fill-in-the-Blanks practice (v1.312.0)
+
+`kw*` / `_kw*` / `qKw*` / `qKeyword*` / `qpFib*` (in `app.js`, search `KEYWORDS IN A
+MODEL ANSWER`), plus the `.kw-*` CSS in `index.html`, the 🔑 **Assign keywords**
+button beside 🤖 AI answer on every answer block, and the **Mode** dropdown on
+Quick Practice.
+
+An open-ended answer is a sentence, and what a student actually has to RECALL is
+a handful of words inside it: *vapour*, *stomata*, *evaporate*. Marking those
+words turns ONE model answer into three things — a key that prints them
+**<u>bold and underlined</u>**, a recall drill that punches them out, and the
+same ordinary question everywhere else.
+
+- **NOTHING IS ASSIGNED BY DEFAULT, and that is the whole design.** A keyword
+  is a teaching decision — which word is the one worth recalling — so it is made
+  by a PERSON, on purpose, one question at a time. No AI path writes one, no
+  import writes one, and **a question nobody has marked simply has no
+  fill-in-the-blanks version of itself**: it is not offered in the mode, its
+  answer key prints exactly as it always did, and nothing anywhere says it is
+  missing anything, because it is not.
+  - The first cut of this (v1.311.0) got it wrong, and the mistake is worth
+    keeping written down. `_markedToBlanks` had long been turning the
+    `[[double bracket]]` marks the AI prompts asked for into a `q.blanks` map
+    that **nothing ever read**, so reading it back looked like a free head
+    start and was in fact the whole bank silently acquiring keywords the
+    teacher never chose. The prompts no longer ask for the brackets at all
+    (`_aiBuildQuestionPrompt`, `_bulkPagePrompt`, `_regenPrompt`,
+    `_epQuestionPrompt` and the exam-paper KEY prompt each say plain prose
+    instead); `_markedToBlanks` stays, purely as the guard that strips a stray
+    pair back out of an answer, since a bracket printed in the middle of a
+    model answer is a bug on its own.
+- **`q.answerKeywords` is the store** — keyed `<blockId>` for a plain answer box
+  and `<blockId>_claim` / `_evidence` / `_reasoning` for a CER block, each
+  holding `{ wordIndex: true }`. It is deliberately its OWN field rather than a
+  flag on `q.blanks`: "did a person choose these words" then has exactly one
+  answer, with no history to reason about and no legacy data sitting in the
+  same map meaning something else. `q.blanks` is untouched and unread — it is
+  not deleted either, because nothing is gained by destroying it.
+- **THE INDEX IS A WORD COUNT, so anything that reads it must count words the
+  way `_markedToBlanks` writes them.** `_kwParse` is the ONE walker, and the two
+  things it must keep doing are the two ways the count silently drifts: an HTML
+  tag is not a word (a `<b>` added mid-answer would otherwise shift every
+  keyword after it along by one) and `&nbsp;` is a space rather than the word
+  "nbsp". It returns each word with its offset in BOTH the plain text and the
+  HTML source — the plain one for the blanks a student fills in, the source one
+  for the bolding, which has to leave the author's own formatting alone.
+- **TWO WAYS TO READ THEM, and the split is deliberate.** PRACTICE blanks the
+  marked INDEX and nothing else — blanking every occurrence of "water" in a
+  three-sentence answer is a wall of empty boxes, not a drill. The ANSWER KEY
+  bolds the WORD wherever it appears in that answer: a key is read rather than
+  answered, so a keyword bold in one sentence and plain in the next reads as a
+  mistake — and it is the only rule that can work there at all, because the
+  ✅ Model answer card a student sees is often the AI's own wording, which has no
+  word indices to line up against. `KW_MIN_BOLD` keeps the automatic bolding off
+  two-letter filler; the author can still blank one by hand.
+- **`qKeyFieldHtml` (HTML in, HTML out) and `qKeyPlainHtml` (plain in, HTML out)
+  are the two doors**, and every answer key goes through one of them: BOTH print
+  paths (`doPrintWorksheetOpen` and `buildWorksheetHtml` — the two that had
+  already drifted over the MCQ answer once), and all three student-facing
+  reveals (`showExplanation`'s ✅ Model answer card, the whole-question mark's
+  per-part line, the per-part mark's). A field with no keywords is handed back
+  **byte for byte**, so nothing about an unmarked question changes.
+- **🔲 Fill-in-the-blanks is a FLAG ON `markCfg`, not a second renderer**
+  (`markCfg.fillBlanks` → `_kwFibBlockHtml` inside `buildOpenBody`). `buildOpenBody`
+  is the ONE body every practice surface renders through, so the mode reaches all
+  of them for free and the two can never drift into showing different questions.
+- **It reuses `_fbStore` / `fbCheck` — the 🔲 Fill-in-the-Blanks BLOCK's own
+  marking** — so exact match comes first and then the AI accepts synonyms,
+  plurals and spelling slips. A student typing "water vapor" must be marked the
+  same way whichever of the two they met it in, and a second marker is a second
+  marker to keep in step.
+- **A block with no keywords falls back to its ordinary typing box** (the
+  renderer returns **null**, never an empty string — an empty string would take
+  the answer box away and put nothing in its place, which renders perfectly and
+  cannot be answered). A question with none anywhere is never SERVED in the mode
+  at all: `qHasKeywords` gates `buildQpQueue`, `qpAvailableTopics` and
+  `launchWorksheetPractice`, because a question with nothing blanked out is an
+  ordinary question wearing the mode's banner.
+- **One selector covers all three surfaces the user asked for**, because they
+  are one queue: Quick Practice has the **Mode** dropdown, and a CUSTOM
+  worksheet (bank picks → 🔲 Fill in the blanks) and a SAVED worksheet
+  (📄 My Worksheets → 🔲 Fill blanks) both go through `launchWorksheetPractice`,
+  which loads the queue into Quick Practice and runs it. `qpSetMode` is the ONE
+  switch and the dropdown is its DISPLAY, never the other way round — a
+  worksheet started in the mode has to leave the page agreeing with it.
+- The mode is a plain global, deliberately not saved: it is a choice about THIS
+  sitting, and a student who filled in blanks last Tuesday should meet ordinary
+  practice on Wednesday rather than be handed the answers again.
+- **🔑 Assign keywords borrows `.improve-btn` for its looks, so ✨ Improve needs
+  a `kw-btn` guard** — the usual trap in this file (✂️ Shorten and ✍️ AI complete
+  carry the same one). Without it one press also runs the button that REWRITES
+  the box. The panel's own *Clear all* / *Done* carry `kw-btn` for the same
+  reason.
+- **The 🔑 panel is the ONLY writer there is.** Nothing is written until the
+  question is SAVED: the panel edits `editorKeywords`, which
+  `collectQuestionData` carries onto the question as `answerKeywords` — a field
+  in `EDITOR_OWNED_QUESTION_FIELDS`, or `carryOverQuestionMeta` would restore a
+  keyword the author had just removed. `kwSyncPanel` is called from
+  `saveBlockContent` rather than by re-rendering the block, because the answer
+  boxes are contenteditable and a re-render would put the caret back at the top
+  on every keystroke; `kwForgetBlock` clears all of a deleted block's keys,
+  since a CER block leaves three behind if only its bare id is cleared.
+- Run **`node tools/keyword-blank-tests.mjs`** after touching any of it.
+
+## ✏️ The answer key, edited from the preview (v1.313.0)
+
+`ake*` / `akx*` (in `app.js`, search `THE ANSWER KEY, EDITED FROM THE PREVIEW`),
+plus `#akeOverlay` and the `.ake-*` CSS in `index.html`, the ✏️ **edit answer**
+button on every row of the printed answer key in the A4 preview, and the
+💡 **Explanations on the answer key** switch on all three printing surfaces.
+
+The answer key is the one page of a worksheet a teacher READS rather than prints
+and forgets — it is what they mark thirty scripts from. So the preview is exactly
+where a wrong answer or a missing explanation gets noticed, and noticing it was
+as far as anyone could get: the fix meant leaving the sheet, finding the question
+in the bank, opening the full editor, and finding the way back.
+
+- **It edits the SAME BLOCKS the key is built from.** `_akeRows(blocks)` walks
+  the question's own blocks and offers exactly the fields `_pushBlockAnswerKey` /
+  `_pushAnswerKeySection` read — a `plainanswer`'s content, a CER block's three
+  fields, an `answerLine`'s answer, a 🔑 `answerKey` block's text, an MCQ's
+  correct option. So anything printed on the key can be edited here, and
+  anything editable here really is what prints. A second list of "the answer
+  fields" would be free to drift from the pushers, and the symptom is a key row
+  nobody can fix — or an edit that saves and changes nothing on paper.
+- **`_wsPreviewPack` hangs the button on each `.print-ak-question` AFTER
+  planning**, exactly as the per-question ⬆ / ⤓ / ✏️ / ✕ tools are hung, and
+  `.wspv-tools` is absolutely positioned — so nothing it adds changes a measured
+  height and the preview still shows the pagination that will print. For the
+  same reason `.print-ak-question` gets **only** `position: relative` in
+  `WS_PREVIEW_CSS`: the planner measures those pages in that very document, so a
+  rule touching their WIDTH would show a page count the PDF does not reproduce.
+  The row carries `data-qid` from BOTH print builders, kept in step.
+- **Nothing is written until Save.** The drawer edits a deep copy, like the
+  ✏️ edit question drawer; Cancel and ✕ leave the bank untouched. Save writes
+  through `saveQuestion`, so a running work session logs it, and every other
+  worksheet, quest and game using that question follows.
+- **An added explanation is filed under a part EXPLICITLY** (`_akeNewExplanation`).
+  `qPartMap` inherits forward, so an explanation appended to a question with
+  parts and no `part` of its own silently reads as explaining the LAST part —
+  the exact fault `QPART_NONE` exists for. A new one is created as a
+  whole-question note (`part: QPART_NONE`) and the drawer offers a picker to
+  attach it to one part instead; on a question with no parts there is nothing to
+  choose and no picker is drawn. The rule is its own function purely so the
+  harness can pin it without a DOM.
+- **A question with NO answer at all is offered a 🔑 `answerKey` block**, not a
+  `plainanswer`. That block prints on the key and renders as nothing inside the
+  question, so the "No answer recorded for this question" row can be fixed
+  without adding a writing box to the student's sheet.
+
+### 💡 Explanations on the answer key
+
+- **`answerKeyExtras` still gates explanations only** — an answer is never
+  optional, an explanation is teaching commentary — but until now only the two
+  past-paper call sites ever turned it on, so a teacher who wrote an explanation
+  on an ordinary worksheet question had nowhere it could be printed. It is a
+  checkbox now: `AKX_SWITCHES` / `akxPrintOn(where)`, the same shape as
+  `WNY_SWITCHES` and for the same reason — an unknown surface returns false
+  rather than falling through to another page's checkbox, which would honour a
+  switch set somewhere else with nothing on screen able to explain it.
+- **All three print surfaces carry it** (`wsIncludeExpl`, `mwIncludeExpl`,
+  `printIncludeExpl`), and `doPrintWorksheetOpen`'s `case 'explanation'` now
+  reads the same switch instead of dropping explanations outright — those two
+  paths had already drifted over the MCQ answer once, and a key that carries the
+  explanations from one print button and not the other is that fault wearing a
+  new hat.
+- **The preview's own 💡 toggle is a VIEW of that checkbox, never a second
+  state** (`akeSetExplPrint` / `akeSyncExplToggle`). The preview overlay covers
+  the printing options behind it, and this is the switch a teacher wants the
+  moment they have just written an explanation — but two switches meaning the
+  same thing is how a sheet prints without the explanations they watched appear
+  on screen.
+- **An explanation reaching the key carries its PART** (`part: qPartNormalize(bPart)`).
+  It used to be pushed unlabelled, which was harmless while nothing could file
+  one per part and is not any more.
+- Run **`node tools/answer-key-edit-tests.mjs`** after touching any of it.
+
+## [2] — how many marks a question is worth (v1.314.0)
+
+`QMARKS_*` / `qMarksOf` / `qMarksLabel` / `qStripTailMarks` / `qMarksAppendHtml`
+/ `qMarksPickerHtml` / `setBlockMarks` / `commitBlockMarks` (in `app.js`, search
+`HOW MANY MARKS A QUESTION IS WORTH`), plus the `.qmarks-*` / `.q-marks` CSS in
+`index.html` and the **Marks** box beside the Part picker in a text block's
+header.
+
+An exam paper prints the marks at the end of the question they belong to —
+*Explain why the bulb lit up when the iron ball was at point A.* **[2]** — and
+until now the only way to get one onto a sheet was to type the brackets into
+the wording by hand.
+
+- **It is a FIELD on the block (`block.marks`), never characters in the
+  wording** — the same design as `block.part` beside it, and for the same
+  reasons: the number can be read by something later, the author sets it in one
+  place instead of remembering a convention, and it cannot end up stranded in
+  the middle of a sentence after an edit.
+- **`qPartBodyHtml` is the ONE place it is drawn**, which is what makes it
+  appear everywhere at once — student practice, the worksheet preview, both
+  print paths, the A.I. marking context — with no surface able to be the one
+  that forgot. The block is never written to: an author sees exactly what they
+  typed in the editor box.
+- **It is inserted INSIDE the last closing tag, not appended to the string.**
+  `block.content` is authored HTML that nearly always ends `…point A.</p>`, so
+  gluing the marker onto the end would put the marks on a line of their own —
+  on every question at once. `QMARKS_TAIL_POS_RE` finds the point where nothing
+  but closing tags and whitespace is left, which is where the full stop is.
+- **The label is drawn from the block, so it must not ALSO be in the text.**
+  `qPartBodyHtml` strips a trailing marks marker whenever the field is set,
+  exactly as it strips a part marker that only repeats the block's own label —
+  and an imported past-paper question very often arrives with "[2]" already
+  transcribed into its wording. Unlike a part letter there is nothing to
+  disagree about (a bracketed number at the end of a question can only be its
+  marks, and there is exactly one marks field), so ANY trailing bracket goes
+  and the field wins. A bracket anywhere else — `[see Diagram 1]`, a reference
+  mid-sentence — is prose and is never touched.
+- **A block with no marks renders BYTE FOR BYTE what it always did.** That is
+  the overwhelming majority of the bank, and the guard the harness leads with.
+- The control is only on `QPART_OPENER_TYPES` blocks — the ones that ASK
+  something. An answer box is not a question and has no marks of its own.
+- **`commitBlockMarks` re-renders only when it really changed the wording**, and
+  says so in a toast. Typing into the box repaints the chip in place
+  (`_qMarksSyncChip`): rebuilding the block card while the author is typing in
+  it takes the caret with it, and words vanishing out of a question box with no
+  explanation is more alarming than the tidy-up is worth.
+- On paper the span is stripped by `escapeHtmlKeepLines` and the plain `[2]`
+  survives, which is the exam convention and exactly what a paper shows.
+- Run **`node tools/question-marks-tests.mjs`** after touching any of it.
+
+## ↩️ Back to the preview you came from (v1.325.0)
+
+`_wsPreviewSnapshot` / `_wsQeReopenPreview` / `wsQuickEditOpenFull` /
+`_afterEditNavigate` / `_syncBackToPapersBtn` / `_wsQeReturn` (search
+`GOING BACK TO THE PREVIEW YOU CAME FROM`).
+
+Every preview carries ✏️ **edit question**, and the drawer's **Full editor**
+button leaves for the real editor. Saving used to drop the teacher on the
+Question Bank — so fixing one question on a PSLE paper meant walking back
+through **📄 Past Papers → the year or the concept → 👁 Preview**, every single
+time. That is how a wrong answer noticed on a sheet ends up not being fixed at
+all.
+
+- **THREE things can be behind that button, and the third is why this is a
+  SNAPSHOT rather than an id**: the worksheet BUILDER's preview (driven by the
+  tick boxes on the page behind it), a SAVED worksheet (a stored list of ids),
+  and a **PSLE PAST PAPER** — which is neither. A paper has no stored list to
+  reopen it from, only the arguments it was previewed with, so those are what
+  is kept. That is the same reason `_wsPreviewPaper` is its own slot beside
+  `_wsPreviewSaved` rather than being squeezed into it.
+- **THE SNAPSHOT IS TAKEN BEFORE THE OVERLAY CLOSES.**
+  `closeWorksheetPreview()` clears both preview slots, so one taken after it is
+  always null — and the return silently stops working while everything else
+  about the edit behaves perfectly. It is stored AFTER `editQuestion`, which
+  resets it.
+- **`editQuestion` clears it**, beside `_editReturnPage` and `_ppReturnFocus`.
+  Without that one line an edit started anywhere else would bounce to whatever
+  preview was last left set — a sheet the teacher has never opened, which is
+  the one way "return to where you were" can be worse than not returning.
+- **`_wsQeReturn` lives at the TOP, with the other return state, not beside the
+  drawer that sets it.** `_syncBackToPapersBtn` reads it and is reached from
+  `setEditMode(false)` inside `navigateTo` — which runs during module
+  evaluation. Declared a thousand lines lower it would be in its temporal dead
+  zone there and take the whole app down on load: the same trap `var editorLos`
+  carries.
+- **The SNAPSHOT decides where to go back to, never the destination page.** A
+  paper preview returns to `papers`, and so does the Past Papers assign panel's
+  own edit (`editQuestionFromPapers`) — which has no preview to reopen. For the
+  same reason the **← Back** button asks the snapshot first: a button promising
+  the page while delivering the preview is a button nobody trusts twice.
+- **A paper is rebuilt from its ARGUMENTS and its questions re-resolved** by
+  `ppPreview`, so the sheet shows the edit that was just saved rather than the
+  copy it was previewed with. It reopens **`quiet`**: the skipped-questions
+  toast is news the first time and noise on every return, and that flag is the
+  only thing `ppPreview` gained.
+- **The reopen is deferred a beat**, so the page it is landing on has rendered
+  underneath the overlay, and the snapshot is **spent on use** so it cannot
+  fire twice.
+- Run **`node tools/preview-return-tests.mjs`** after touching any of it.
+
+## 📄 The answer key is PAGINATED, and previewable from the past papers (v1.315.0)
+
+`_packAkRows` / `_akPageTitle` / `_printAkPageEl` / `_printPlanAkPages` (in
+`app.js`, search `the ANSWER KEY, paginated`), `_wsPreviewPaper` / `ppPreview` /
+`_ppPrintQuestions` (search `ppPreview`), and the `.ak-expl` rules in
+`index.html`'s `@media print` block.
+
+- **The key used to be ONE pre-built page.** `_printPlanIn` measured it whole:
+  too tall to shrink readably and it was marked `tall` and left to flow. On
+  screen that is a single sheet several pages long with the rows running off
+  the bottom of it, and in the PDF a page box that is a fixed height with
+  visible overflow. A twenty-three-question key is the ORDINARY case. Its rows
+  are packed into sheets now, the way the question chunks already were:
+  `_packAkRows` proposes, and every candidate sheet is then assembled and
+  measured for real — the measure-never-assume rule the rest of the planner
+  follows.
+- **The heading is reprinted on every sheet, so it comes out of EVERY sheet's
+  budget** — charged once, sheet two onwards is over the bar by a heading.
+  Sheet two says *(continued)*: a teacher flipping over needs to know it is not
+  a second key.
+- **`_printAkPageEl` is the ONE builder both consumers call.**
+  `doScaleAndPrint` and `_wsPreviewPack` assemble the sheets separately; if
+  either stops calling it, the preview paginates differently from the PDF and
+  the teacher checks a layout they will not get.
+- **`_printPlanAkPages` hands the rows back in INDEX order.** Measuring moves
+  them about, and the live preview plans against the very DOM it then rebuilds
+  from — a re-query in shuffled order gives sheet one the rows of sheet three,
+  every answer under the wrong question number, with nothing anywhere saying so.
+- **`akPlans[i]` is an ARRAY of sheets now**, not one `{zoom,tall,h}`. Both
+  readers were changed with it.
+
+### 👁 Preview a past paper
+
+- **`_wsPreviewPaper` is the preview's third context**, beside the builder's and
+  a saved worksheet's. A past paper is not a saved worksheet — there is no
+  stored list of ids to edit — so it gets its own slot rather than being
+  squeezed into that one; `_wsPreviewCtx` grows a `paper` branch and the
+  ✎ Questions button and the 💡 toggle are hidden for it.
+- **A paper always prints its explanations** (it is a marking scheme), so the
+  context carries `akExtras: true` and `akeExplPrintOn()` reads the CONTEXT
+  rather than `AKX_SWITCHES` — asking the checkbox table about a surface that
+  has no checkbox would tell the drawer the opposite of the truth.
+- **`_ppPrintQuestions` is the ONE list builder** the preview and the print
+  share, and `printFromPreview` hands `ppDoPrint` back the very arguments the
+  preview was opened with. A preview assembled its own way is a preview of a
+  different paper.
+- Each of the three print entry points (`ppPrintConcept`, `ppPrintYear`,
+  `ppPrintSelected`) takes a `go` argument and dispatches to `ppPreview` or
+  `ppDoPrint`, so the two can never collect different questions.
+
+### The explanation is set apart from the answer
+
+`_akSectionsHtml` tags an explanation section `ak-expl` from its `kind`, never
+from its label text — the label is one literal today and would be a silent
+match on any wording tomorrow. The print CSS gives it a clear gap and a
+hairline above: run on directly underneath, the answer and the explanation read
+as one block of text, and the answer is what a teacher marks from at a glance.
+
+Run **`node tools/answer-key-pagination-tests.mjs`** after touching any of it.
+
+## (b)(i) — roman sub-parts (v1.316.0)
+
+`QPART_ROMANS` / `qSubNormalize` / `qPartKey` / `qPartLetterOf` / `qPartSubOf` /
+`qPartKeyIn` / `qBlockOpensSub` / `qBlockOpensKey` / `setBlockSubPart` (in
+`app.js`, search `ROMAN SUB-PARTS`), plus the second select in a text block's
+header and `.qpart-sub` in `index.html`.
+
+A PSLE part very often splits again into (i) and (ii), and the app had no way
+to say so: both sub-answers inherited the same letter, so the printed answer key
+gave ONE "(b)" heading with two answers run together under it and the A.I.
+marker was handed both sub-questions as a single item.
+
+- **It is a SECOND FIELD, `block.subPart`, not a wider alphabet on `part`.**
+  That is what lets a sub-part INHERIT its letter: a block carrying only
+  `subPart: 'ii'` belongs to whatever letter is current, so renaming (b) to (c)
+  carries its sub-parts along. Storing `"b.ii"` on the block would freeze the
+  letter at the moment it was typed.
+- **`qPartMap` hands back a part KEY, not a bare letter** — `'b'`, `'b.i'`, and
+  `'.i'` for a question numbered (i) (ii) with no letters at all. The `.` can
+  never occur inside either half, so the key always comes back apart
+  (`qPartLetterOf` / `qPartSubOf`). Everything that RENDERS goes through
+  `qPartLabel`, which turns a key into `(b)(i)`; everything that COMPARES
+  compares keys, so (b)(i) and (b)(ii) are properly different questions
+  everywhere at once — the answer key's headings, `_openSection`'s
+  `items[].label`, `_partPromptText`, `_aiPartScopeLine` and `_questionContext`.
+- **`qBlockOpensPart` still returns a bare LETTER**, through the new strict
+  `qPartLetterNormalize`. The exam paper builder, `autoNumberParts`, the
+  Question Doctor's scan and `qScopeExplanations` are all letter-scoped, and
+  handing any of them `'b.i'` makes it silently match nothing.
+- **A LETTER covers its own sub-parts** (`qPartKeyIn`): `qPartSpan(blocks,'b')`
+  and `qPartFind` still find everything in (b)(i) and (b)(ii), or the marking
+  scheme's answer for part (b) would land nowhere. `qPlacePartExplanation` also
+  stamps `part: letter` on the note it inserts — a part ending on (b)(ii) would
+  otherwise have the whole part's explanation inherit that key and read as
+  explaining only the second sub-question.
+- **A NEW letter starts fresh.** `(c)` takes only the sub-part its own block
+  declares; without that, everything under (c) would be filed as (c)(ii).
+- **DETECTION IS STILL LETTERS ONLY.** `QPART_LETTERS` stops at `h` precisely
+  because `i` collides with the roman `(i)`, and nothing here changes that: a
+  sub-part is set by hand on the block, never guessed out of unvetted text. No
+  AI prompt writes `subPart`.
+- **The label is drawn from the block, so a roman must not ALSO be in the
+  text.** `_qSubOwnMarker` / `_qOwnMarkersOff` extend the v1.293.1 rule: the
+  letter marker comes off first, then a roman that names this block's OWN
+  sub-part, so "(b)(ii) placing all three beakers" loses both. A roman that is
+  NOT this block's own is left for a human — two people disagreeing about which
+  question this is.
+- **`qBlockOpensKey(b, map)` is what a block prints beside ITSELF.** A block
+  that opens only a roman would otherwise show nothing at all, on screen and on
+  paper: `qBlockOpensPart` is a letter and this block has none of its own.
+- **The whole part vocabulary lives together, immediately after
+  `qPartNormalize`.** Four harnesses cut that window out of `app.js`; a helper
+  declared anywhere else is a `ReferenceError` in all of them.
+- Run **`node tools/sub-part-tests.mjs`** after touching any of it.
+
+## 📷 A question that came off a photograph (v1.318.0)
+
+`_vetIsScanned` / `SCANNED_SOURCE` (search `A QUESTION THAT CAME OFF A PHOTOGRAPH`), plus
+the purple outline and the **📷 From the Scan app** badge on a vetting card.
+
+The Scan app (`polymathlc/scan`) reads a worksheet or an exam paper on a phone.
+The teacher can now send any question it read straight into **this app's
+vetting list** — `users/{adminUid}/vetting` — and it arrives as an
+ordinary pending question with one extra field.
+
+- **`source: "scan"` is the whole contract between two repositories that
+  cannot see each other**, and it fails silently in both directions. Rename
+  the value on either side and the card still arrives, still renders and still
+  approves; it simply stops being purple and stops saying where it came from,
+  with nothing anywhere to say so. **Ship a change to the word in all five
+  repos together** (`scan`, `cer`, `math`, `english`, `chinese`).
+- **It has to be LOUD, because a scanned question is not like a typed one.** It
+  was read by a model from a picture of somebody's worksheet: the wording may
+  be half a line short, **the diagram is not there at all**, and the topic
+  is left blank on purpose (it belongs to the syllabus list that app has
+  never seen), so it arrives flagged `topicConfidence: 'low'` and wears the
+  existing ⚠ check topic badge.
+  A card that looked like every other draft would be approved at the same speed
+  as one somebody typed and checked, and reach the bank with a figure missing.
+- **`_vetIsScanned` is the ONE predicate**, and the outline and the badge both read
+  it. Two tests would drift into a card that is purple with no badge (which
+  reads as a styling bug) or badged with no outline (which is the warning made
+  invisible).
+- **Three outlines compete for one border, so they are RANKED rather than
+  layered (`restBorder`): a possible duplicate is the thing to look at first,
+  then where the question came from, then merely that it is new — and a card
+  ticked for deletion outranks all three. They are all inline styles, so one
+  has to win outright.**
+- **It lands in VETTING and nowhere else.** The Scan app writes one document
+  into this app's vetting collection and touches nothing else — not the bank,
+  not a student's progress, not the notebook. Approving it is the ordinary
+  approve, and from then on it is an ordinary question.
+- **The child's work never travels.** The Scan app marks what the student wrote
+  on the paper; none of that is in the document. A bank question is the
+  QUESTION, its options, its answer and why.
+- Run **`node tools/scanned-question-tests.mjs`** after touching any of it.
+
+## ⚙️ Choosing the AI engine — three routes, and the key is on the SERVER
+
+`AI_DOWN_MS` / `_aiDown` / `_aiWhy` / `aiEngineOrder` / `askOpenAiServer` /
+`askChatGpt` / `_aiRun` / `_aiAsk` / `askGeminiDirect` / `aiRouteReport` /
+`renderAiEngineStatus` / `aiEngineChoicePreview` (in `app.js`, search
+`THREE ROUTES`), plus `#aiEngineStatus` in the AI Engine chooser. **All the
+portals carry this same block — keep them in step.**
+
+All the apps answer through Gemini on the shared `mathgen--app` project, so
+when that project's billing cap is hit they **all die at once and
+identically** — `[429] Your billing account has exceeded its monthly spending
+cap`, on every call, on every device, until the month turns over.
+
+- **THE ORDER IS THE DESIGN**: Gemini, then **ChatGPT on the SERVER**, then
+  ChatGPT on a key pasted into this browser. The chooser reverses it. That is
+  what choosing an engine now means: **which is tried FIRST, never which is
+  available.**
+- **The failover used to go ONE WAY, which is why it never helped.** The old
+  code fell from ChatGPT to Gemini and never the other way — so the failure
+  that actually happens, a capped Gemini, had nothing behind it at all.
+- **THE SERVER ROUTE IS WHAT MAKES THE CHOICE REAL.** `askOpenAiServer` calls
+  the `askOpenAi` Cloud Function in `polymathlc/math/functions`, which holds
+  the key as a Firebase secret and enforces the sign-in, the model, the size
+  caps and a daily quota. Before it existed, choosing ChatGPT needed a key
+  pasted into every device separately — so it worked on the teacher's laptop
+  and **no student's phone**, which is the half of the school that matters. A
+  key cannot be shipped in `app.js` instead: this is a public static site
+  served to every student's browser.
+  - **It needs one deploy**: `firebase functions:secrets:set OPENAI_API_KEY`
+    and a functions deploy in the Maths repo. Until then the call returns
+    `failed-precondition` and the chooser says **in those words** that the
+    server key is not switched on yet — a deploy step and a rejected key are
+    different problems, and an app that reported both as *AI error* would send
+    the teacher looking in the wrong place.
+- **A key in `localStorage` is the THIRD route, not the first.** It is what
+  keeps ChatGPT working before the function is deployed, or if it ever stops
+  answering, and it is still shared with the other portals. The chooser says
+  so rather than presenting it as the fix, and **no longer refuses to save a
+  ChatGPT choice without one**.
+- **`openai` is ALWAYS in the order.** Whether the function is deployed is not
+  something a page can know without asking; one refused call marks it down for
+  `AI_DOWN_MS` rather than being paid for again on every page of a bulk
+  import. `__aiReady()` is therefore simply `true` — an app that asked "is
+  Gemini up" would refuse every AI button on a capped project that can in fact
+  answer.
+- **A refused route goes to the BACK of the list, never off it**: a cap is
+  lifted eventually, and refusing on a stale note is worse than spending one
+  call finding out. A success clears the mark.
+- **When every route refuses, the FIRST error is thrown.** It names the real
+  problem; the last is usually "no key on this device".
+- **`askGeminiDirect` is the raw Gemini call, written once.** Both doors used
+  to carry their own copy of it, and both carried their own copy of the
+  one-way ChatGPT fallback too.
+- **A REASONING MODEL IS A FAMILY, NOT ONE ID** (`OPENAI_REASONING_RE`,
+  v1.357.0). The default is **`gpt-6-astra`** now, and gpt-5.x and gpt-6-astra
+  want the same request SHAPE — `reasoning_effort` yes, `temperature` never.
+  A gate written as `/^gpt-5/` therefore does not merely miss the newer model,
+  it sends it the WRONG request: a temperature it answers with a **400**, and
+  no thinking at all. Both are silent — the call falls to the next route for a
+  reason nothing on screen can name, or comes back fluent and thin. So the
+  family is named ONCE and every gate asks it. `bar-model.html` carries its own
+  copy (`isReasoning`) because it is a standalone page.
+- **A DEFAULT NOBODY CHOSE IS NOT A CHOICE** (`OPENAI_SUPERSEDED_MODELS` /
+  `OPENAI_MODEL_GEN` / the one-shot lift). The stored model is written every
+  time the AI Engine dialog is saved, so almost everyone is carrying
+  yesterday's default pinned in their own settings — and a NEW default then
+  reaches nobody who has ever opened that dialog, on a screen still naming the
+  old model. That is the whole upgrade silently not happening. A model that was
+  only ever a default is lifted ONCE, per device; the flag is what makes a
+  DELIBERATE pick of the old model stick, because it is still in the dropdown
+  and choosing it there has to mean something. Bump `OPENAI_MODEL_GEN` and add
+  the outgoing id to `OPENAI_SUPERSEDED_MODELS` on the next flagship.
+- **The chooser SAYS what is actually happening** (`renderAiEngineStatus`),
+  because an app quietly running on its second route looks exactly like one
+  running on its first, and an app with nothing behind its first looks like
+  both. It reports only what it knows: the routes in the order they will be
+  tried, and what each said the last time it refused.
+  `aiEngineChoicePreview` shows the order a radio would produce **without
+  committing it** — a preview that saved would make Cancel a lie.
+- Run **`node tools/ai-routes-tests.mjs`** after touching any of it.
+
+### ⚡ …and QUESTION ADDING leads with ChatGPT (v1.358.0)
+
+`AI_AUTHOR_DEFAULT` / `AI_AUTHOR_FOLLOW` / `getAiAuthorEngine` /
+**`aiAuthorSetting`** / **`aiAuthorEngine`** / `_aiAuthorFromDoc` /
+`aiEngineOrder(task)` / `aiEngineAuthorPreview`, the `authoring` option on
+`askGemini` and `askGeminiVision`, the `aiAuthorEngine` field on
+`config/admin`, and the **Adding a question uses** picker in the AI Engine
+dialog.
+
+**The complaint this answers was a BILL.** ChatGPT was switched on, every
+screen said so, and the OpenAI account barely moved while Gemini's did.
+Nothing was broken: `aiEngineOrder` puts the CHOSEN engine first and the
+others *behind* it, the shared default is Gemini, Gemini answers, and the
+second route is therefore reached **only when the first refuses**. That is
+the design and it is right — but it means "ChatGPT is on" and "ChatGPT has
+never been called" are the same screen.
+
+- **AUTHORING IS THE ONE PLACE WORTH PAYING FOR, and that is why this is a
+  SECOND setting rather than a new default for everything.** Reading a paper,
+  lettering its parts, writing the answer and arguing the explanation is the
+  hardest reasoning this app asks for, it is checked by a person before
+  anybody sees it, and it is a handful of the TEACHER's calls. Marking thirty
+  students is the opposite trade on every count. Moving the whole app would
+  have been a bill nobody asked for.
+- **`aiEngineOrder(task)` is the ONE place the two orders are built**, and
+  everything under it is unchanged: the chosen engine's routes lead and the
+  other two stay behind them, so a capped or empty OpenAI account still falls
+  through to Gemini rather than taking question building down with it.
+- **`skipOpenAi` OUTRANKS `authoring`.** 🔍 Answer key cross-check names the
+  engine it wants; a Gemini column quietly answered by ChatGPT is two columns
+  of the same model reading as a clean bill of health.
+- **`'follow'` is a real answer, not an absence** — it is how an admin says
+  "one engine for everything" and has it stay said, which is why this is a
+  four-value picker rather than a tick box. An **unset** shared field is the
+  DEFAULT (ChatGPT), so a centre that has never opened the dialog gets Astra
+  on its question building; a value from a later build falls back to the
+  default rather than to null.
+- **THE CHOOSER SAYS BOTH ORDERS** (`aiRouteReport`'s `authorOrder` /
+  `authorSame`, printed by `renderAiEngineStatus`). An app whose question
+  building runs on a different engine from its marking looks, from every
+  screen, exactly like one that does not — which is the whole reason this was
+  invisible for a month.
+- **The setting is the CENTRE's**, on the same `config/admin` document and the
+  same MERGE write as the main engine. **The `aiEngineConfig` callable
+  fallback carries the main engine and nothing else** — it is another
+  repository's function and widening it is a functions deploy — so on that
+  path `_aiSharedAuthor` is released back to the device's own value rather
+  than being masked by a stale shared one.
+- **THE CENSUS IN `tools/ai-routes-tests.mjs` IS THE HALF THAT MATTERS.** It
+  names the ten question-building functions and fails if any of their AI calls
+  stops passing `authoring: true` — a path that forgets it silently goes back
+  to the centre-wide engine while the dialog still promises ChatGPT — **and it
+  fails the other way too**, on any function NOT on that list that starts
+  passing it: every student-facing call on the paid engine is a bill nobody
+  asked for. Adding a build path means adding its name there with a reason.
+- Run **`node tools/ai-routes-tests.mjs`** after touching any of it.
+
+### The engine choice belongs to the CENTRE, not to a browser
+
+`aiPreferredEngine` / `aiEngineLoadShared` / `aiEngineSetShared` /
+`_aiSharedEngine` / `AI_SHARED_TTL`, and the `aiEngineConfig` callable in
+`polymathlc/math/functions`.
+
+A device-local engine choice was the bug wearing a feature's clothes: the
+teacher switched to ChatGPT on their own laptop, watched it work, and **every
+student stayed on the capped Gemini** — with the screen on the machine they
+set it on looking exactly as it should. So the admin sets it once and every
+signed-in device follows until they set it back.
+
+- **It is a CALLABLE, not a Firestore document the clients read.** The shared
+  `firestore.rules` in the Maths repo does not contain the Science app's own
+  rules — it carries a placeholder telling you to paste them in from the
+  console first — so **any** rules deploy from there is a manual assembly job
+  with the whole project's access as the blast radius. A new world-readable
+  document would need exactly that. The function writes through the Admin SDK,
+  which bypasses rules, so the shared setting costs no rules change at all:
+  the deploy that switches ChatGPT on switches this on with it.
+- **Reading is open to any signed-in user; WRITING is the admin's alone**, and
+  it is checked in the function — the dialog's own gate is not a lock.
+- **`_aiSharedEngine` is null until the callable answers**, and the device
+  preference stands in until then. A project where the function has never been
+  deployed behaves exactly as it always did, rather than waiting on a call
+  that is never coming.
+- **A write that FAILED is reported.** A teacher told nothing would believe
+  the whole centre had moved. The message names the missing deploy when that
+  is what it is.
+- **The page says WHOSE setting is in force** — centre-wide, or this device's
+  own because the shared one could not be read.
+
+### Where the shared setting lives — and why it is not a new document
+
+`_aiCfgRef` / `aiEngineWatchShared` / `aiEngineStopShared` (v1.321.0). The
+engine is a **field on this app's own admin-pointer document** — the one every
+signed-in device already reads to find out whose question bank to load, and
+that only the admin can write.
+
+- **So it needs NO rules change and NO deploy.** Both the read and the write
+  are paths this app has exercised in production since it shipped. A brand-new
+  document would have been tidier and would have needed a rules deploy — from
+  a file that does not even contain this app's own rules — so tidier was not
+  worth it.
+- **The write is a MERGE, always**, and so is the admin sign-in write that
+  puts `uid`/`email` on the same document. A plain set on either would take
+  the other's field off: the bank pointer, or the engine setting the teacher
+  set that morning. The sign-in one was a plain set until v1.321.0, and it
+  would have wiped the toggle every day.
+- **It is a LIVE listener, not a poll**, so a device with the app open follows
+  the teacher within seconds. That is what app-wide has to mean.
+- **It comes down on sign-out**, or one account's engine setting goes on
+  governing the next person to sign in on the device — the same rule the
+  teaching-notes listener carries.
+- **An unset field means Gemini**, the default every app already had, so a
+  centre that never touches this is unaffected.
+- **The `aiEngineConfig` callable is kept as the FALLBACK** for the case where
+  the direct read or write is ever denied: it goes through the Admin SDK,
+  which bypasses rules.
+
+### When nothing answers, say what everything said
+
+`AI_ROUTE_LABEL` and the tail of `_aiAsk`. The first error is kept as `cause`,
+but the message names **every** route: `Gemini: … · ChatGPT (server key): …`.
+
+Reporting only the first hides the rest. A card reading *"Gemini: your billing
+account has exceeded its monthly spending cap"* and nothing else sends the
+teacher to the Google console — when what actually needs doing is deploying
+the ChatGPT function. That is a real hour lost, and it is exactly what
+happened.
+
+- **`skipOpenAi: true` still means Gemini and nothing else**, and it is still
+  load-bearing: it is what forces the Gemini column of 🔍 Answer key
+  cross-check to really be Gemini. Without it both columns can be the same
+  model and the report reads as a clean bill of health. The ChatGPT column now
+  goes through `askChatGpt`, so the second opinion exists on a device with no
+  key of its own — which is the whole reason that report is worth running, and
+  `akcEngines` therefore offers it whether or not a key is saved.
+
+### 🌙 Kimi — the THIRD engine, and why two was not enough
+
+`AI_ENGINES` / `_aiRoutesFor` / `askKimiDirect` / `askKimiServer` / `askKimi` /
+`kimiListModels` / `_kimiModelNote` / `KIMI_DEFAULT_MODEL` (in `app.js`, search
+`KIMI (Moonshot AI)`), plus the third radio, the model box and the key box in
+the AI Engine dialog. **All the portals carry the same block — keep them in
+step.**
+
+Gemini and ChatGPT are two suppliers on two bills, so "whichever will answer"
+has never been more than one deep. The morning the Firebase project is capped
+**and** the OpenAI account is out of credit is a morning that happens, and it
+used to leave every app in the family dead at once. Kimi is a third company,
+a third account and a third cap.
+
+- **An ENGINE is one or two ROUTES, and that shape is now the whole order.**
+  `AI_ENGINES` is the three a teacher chooses between; `_aiRoutesFor` turns
+  each into the routes it actually has — the server's key, and behind it a key
+  pasted into this browser. The chosen engine's routes go first and **the other
+  two stay behind them**, which is what makes a capped supplier survivable
+  rather than fatal. An engine name nobody recognises still yields every route
+  rather than an empty list: a stale word in the shared setting would otherwise
+  take the AI off every device at once.
+- **`askChatGpt` had to stop meaning "not Gemini".** It was
+  `filter(e => e !== 'gemini')`, which was right with two engines and is
+  silently wrong with three — 🔍 Answer key cross-check asks for a **named**
+  second opinion, so a ChatGPT column quietly answered by Kimi is two engines
+  agreeing in the report and one engine agreeing with itself in fact. Both
+  `askChatGpt` and `askKimi` are filtered to their OWN routes now.
+- **A PDF is REFUSED BY NAME, never dropped.** A PDF is an OpenAI `file` part
+  and Moonshot has no such part, so `askKimiDirect` throws rather than sending
+  a request without its pages — which would come back fluent and about nothing
+  at all. The loop then falls to a route that can read it, which is the whole
+  point of the loop.
+- **THE MODEL IS A FIELD, NOT A CONSTANT**, and this is the failure mode to
+  design for: Moonshot renames its flagship with every release (`kimi-k2-…`,
+  `kimi-k3-…`), so an id hard-coded on the day this shipped is a 404 on every
+  call a few months later — and a 404 on every call reads as "Kimi is broken"
+  rather than "the id is a release out of date". 🔄 **Load models**
+  (`kimiListModels`) asks the account itself, and **`_kimiModelNote` says it in
+  words** in the chooser's status panel. `KIMI_DEFAULT_MODEL` is only what an
+  admin who has never opened the box gets.
+- **The server route is what makes the choice real**, exactly as it is for
+  ChatGPT: `askKimi` is a callable in `polymathlc/math/functions` holding
+  `MOONSHOT_API_KEY` as a Firebase secret, so a student's phone uses it with
+  nothing set up on it. **It needs one deploy** —
+  `firebase functions:secrets:set MOONSHOT_API_KEY` and a functions deploy —
+  and until then it returns `failed-precondition` and the chooser says *the
+  server key is not switched on yet* rather than *AI error*.
+  - It is the ONE callable in that file that takes the **model** from the
+    client, because a teacher cannot redeploy a Cloud Function to follow
+    Moonshot's renames. `KIMI_MODEL_RE` is what keeps that from becoming "a
+    client naming an expensive model on the centre's bill": it can only ever
+    be a Moonshot id, and anything else falls back to the server's own.
+  - Its throttle counts on **its own fields** (`kimiDay` / `kimiCount` /
+    `lastKimiAt`). Sharing ChatGPT's would mean a capped ChatGPT day silently
+    closing Kimi too — on exactly the day Kimi is the one engine still
+    answering.
+- **The key is NEVER in the repo.** These are public static sites served to
+  every student's browser. The harness fails on an `sk-`-shaped string in the
+  source, and that check now covers every engine's key rather than OpenAI's.
+- Run **`node tools/ai-routes-tests.mjs`** after touching any of it.
+
+
+## The printed part label reserves its OWN width (v1.324.1)
+
+`PRINT_PART_PAD_MIN` / `PRINT_PART_PAD_PER_CH` / `PRINT_PART_PAD_GAP` /
+`PRINT_PART_PAD_MAX` / `printPartPadPt` / `printPartBlockHtml` (in `app.js`,
+search `THE PRINTED PART LABEL RESERVES ITS OWN WIDTH`), plus the
+`.print-text-block.print-has-part .print-part-label` rule in `index.html`.
+
+A block that OPENS a part hangs its label in the margin, and the label is
+positioned **out of the flow** — so the block has to RESERVE the room with
+`padding-left`. That reserve was a flat **26pt**, which is exactly the room
+`(a)` needs and nothing like the room `(b)(iii)` — a roman sub-part — needs. A wider label printed
+**straight over the first words of its own question**, on every surface that
+uses the print CSS at once: both print builders and the live A4 preview.
+
+- **The reserve is MEASURED FROM THE LABEL**, and `printPartBlockHtml` is the
+  ONE place a printed part label and the block carrying it are built. It
+  writes the same number into both — the padding the text starts at, and the
+  width of the label's own box — so **they can never disagree**. Two
+  expressions computing that width separately is exactly how they drift back
+  apart, and the symptom is a label sitting on top of a sentence on paper,
+  which nobody sees until a class is in front of it.
+- **`(a)` is unchanged, byte for byte.** `PRINT_PART_PAD_MIN` IS the old 26pt,
+  so the overwhelming majority of the bank prints exactly as it always did —
+  and the print planner, which measures the finished page, re-plans around the
+  wider blocks for free.
+- **`PRINT_PART_PAD_MAX` bounds it.** A label allowed to grow without limit
+  would eat the column rather than the question; past the cap it wraps inside
+  its own box instead, which is what `overflow-wrap` in the CSS is for.
+- **`box-sizing: border-box` on the label is load-bearing.** Its width is the
+  same number as the block's padding, so without it the padding-right would
+  push the label's box past where the text begins and put the overlap back.
+- **`min-height: 17.6pt` on the block stays.** The label is out of the flow, so
+  a block that carries a part and no text of its own measured zero tall — the
+  marker painted over whatever came next and contributed nothing to the
+  planner's chunk height.
+
+## ✏️ Editing mode — the whole worksheet, condensed, in one scroll (v1.326.0)
+
+`em*` (in `app.js`, search `EDITING MODE`), plus `#emOverlay` and the `.em-*`
+CSS in `index.html`, the ✏️ **Editing mode** button in the A4 preview bar, the
+✏️ **Edit questions** button on a 📄 My Worksheets card and ✏️ **Edit all** beside
+👁 Preview on every 📄 Past Papers year and concept.
+
+👁 Preview shows the sheet as it will PRINT and fixes one question at a time;
+✎ Questions edits which questions are ON the sheet. Neither is any use to
+somebody who has just read a whole paper through and wants to correct a wrong
+option here, a missing part letter there, an answer that reads badly on question
+14 — because the way to do that was to open the full block editor once per
+question, and the full block editor spends most of its height on things that are
+not the question: a paste pad, a URL box, a print size and its paragraph of
+explanation, a toolbar, an answer-key panel.
+
+Editing mode is that same editor with the furniture folded away. **Every question
+on the sheet is loaded at once**, one after another; each block is a thin strip —
+the content, and a vertical rail of tiny icons down its left edge carrying every
+control. Scroll from the first question to the last, fix what you find, press
+💾 **Save all changes** once. Gated on `_canAuthor()`.
+
+- **IT IS THE SAME EDITOR, NOT A SECOND ONE.** `#blocksList` is **MOVED** into
+  the overlay — the very node the create page uses — so `renderBlocks()`, every
+  inline `onclick`, every `data-` handler and every `blocks.find(...)` lookup
+  work byte-for-byte as they always did, and a block type added next month is
+  condensed without being told about. A second block editor written for this
+  view would be a second editor to fix every bug in, and it would drift from the
+  first the week after it shipped. `_em.home` is where it came from and it is put
+  back there on close; `_em.prev` is the create page's own editor state, handed
+  back untouched.
+- **THE GLOBAL `blocks` HOLDS EVERY QUESTION AT ONCE**, so a walk of the whole
+  array is a walk of the whole paper. `_em.owner` says which question each block
+  belongs to and **`emScope(blockId)` is the ONE place that is resolved** —
+  outside editing mode it hands back `blocks` itself, unchanged. Anything that
+  reads the question AROUND a block goes through it: **`qPartMap` above all**,
+  which inherits FORWARD, so without it part (c) of question 3 is inherited by
+  every block of question 4 and the answer key files them under it. The readers
+  are `qPartPickerHtml`, `aiGenerateBlockAnswer`, `aiGenerateBlockExplanation`,
+  `_widgetQuestionContext`, `annotAnsWriteKey` and `_akdEditorQuestion`; the
+  symptom of forgetting is an AI answer that is fluent, confident and about a
+  different question — **so a CENSUS in the harness fails on the next one that
+  is added without it**, rather than anyone having to remember. See
+  **🤖 An AI answer is written for ONE question** below.
+- **…and the same for the TITLE and TOPIC an AI call is grounded on.**
+  `emTitleFor` / `emTopicFor` read the OWNING question; the create page's own
+  `#questionTitle` and `#topicSelect` still hold whatever was open there, and
+  reading them grounds the call on a question that is not even on screen.
+- **A BLOCK ID IS UNIQUE ACROSS THE WHOLE SHEET.** Two questions duplicated from
+  each other carry the same block ids, and every handler in this editor finds its
+  block BY ID — so a collision is typing into question 7 and watching question 2
+  change. A repeat is re-keyed on the way in, and its **keyword and blank entries
+  are carried across with it** or they are left pointing at an id nothing uses.
+- **A QUESTION MAY NEVER BE EMPTIED.** `qPartMap` and the owner map are both
+  positional, so a question with no blocks left has nowhere to draw its heading
+  and nothing to own a newly inserted block. `emMayRemove` refuses the last one
+  and the toast points at the ✕ on the question's own heading instead.
+- **THERE ARE TWO DELETES, AND THEY ARE DIFFERENT SIZES** (v1.328.0).
+  🗑 at the foot of a rail removes one BLOCK; ✕ on a question's heading removes
+  the whole QUESTION. Neither touches the question bank — that is the bank's own
+  🗑, and a question taken off one sheet is still on every other sheet using it.
+  - **The block 🗑 is held out of the run of icons and given the FOOT of the
+    rail** (`emRailDelete`), across its full width, in red before it is hovered.
+    It went onto the rail in its turn until v1.328.0, which put one 14px grey
+    outline among ten identical grey outlines in the middle of a two-column
+    grid, told apart only by hovering each in turn: **a delete button that is on
+    the screen and cannot be found reads — correctly — as one that is not
+    there**, which is exactly how it was reported. It is the SAME button moved,
+    never a copy. `emCondenseEnhanceBar` anchors before the ⚙ **or the 🗑**, so
+    the picture tools can never land underneath it.
+  - **✕ MEANS DIFFERENT THINGS ON THE TWO KINDS OF SHEET, and the label says
+    which.** A SAVED worksheet is an ordered list of bank ids, so the question
+    really comes off it — written back through **`wseRemoveFrom`**, the very
+    function the ✎ Questions drawer and the preview's own ✕ already use, because
+    a second removal path here would be free to forget what that one remembers
+    (`wsManualBreaks` / `wsMergeUp` are keyed by question id, so a break left
+    behind would sit on whatever came after it). A PAST PAPER is generated from
+    its own year or concept and has **no list to edit**, so there is nothing
+    honest to persist: it is dropped from THIS scroll and the paper is untouched
+    — and the confirm says so in as many words, rather than leaving a button
+    that quietly did less than its label claimed.
+  - **`emDropQuestion` takes the blocks, the owner entries, the keywords and the
+    blanks together.** Anything left behind points at an id nothing uses any
+    more, and a keyword orphan comes back on the next block given that id —
+    which is why `removeBlock` calls `kwForgetBlock` too. It then **renumbers**
+    `_em.qs`: those numbers are POSITIONS on the sheet, a gap in them reads as a
+    question that failed to load, and `emSaveAll` reports a failure by that same
+    number.
+  - **The scroll loses the question BEFORE the worksheet write goes out**, so a
+    refused write leaves the sheet and the screen disagreeing about a question
+    that has gone rather than about one still on screen. Removing the last
+    question closes editing mode rather than leaving a blank scroll.
+- **🤖 AN AI ANSWER IS WRITTEN FOR ONE QUESTION** (v1.329.0). This is the rule
+  above, and it had already been broken by the very button most likely to break
+  it: **`aiGenerateBlockAnswer` walked the global `blocks`** while its own
+  comment said it did not, and `aiGenerateBlockExplanation`'s comment pointed at
+  it as the example to follow. The whole paper went to the model as one
+  question, in three separate ways, every one of them silent:
+  - `qPartMap` over the sheet made `target` whatever part had last been opened
+    ANYWHERE, so `_aiPartScopeLine` marked `>>>` around every other question's
+    part (a) as well as this one's;
+  - the answer boxes were numbered ACROSS the paper, so "answer box 1" meant
+    the first box of question 1 rather than of this question;
+  - `ctxBits` is clipped to 3500 characters **from the front**, so on any
+    question past the first few the `>>> WRITE THIS ONE <<<` marker was cut off
+    entirely and the model answered whichever question it could still see.
+
+  The symptom is the one that makes it worth a census: a fluent, correct-looking
+  model answer to a DIFFERENT question on the same paper, written into the box —
+  a transport-in-plants answer under *"which temperature did fish F prefer"* —
+  with nothing on any screen saying anything went wrong. **`annotAnsWriteKey`
+  and `_akdEditorQuestion` had the same fault**: the first joined every text
+  block on the sheet and clipped to 600 characters from the front, the second
+  handed the whole array to the diagram generator along with the CREATE PAGE's
+  own `#questionTitle` / `#topicSelect` — a picture drawn for a question that
+  is not even on screen.
+- **TWO CENSUSES in `tools/editing-mode-tests.mjs` are what stop the next one.**
+  They read `app.js` itself: any function taking a `blockId` that reads the
+  global `blocks` for anything but a by-id lookup FAILS unless it is named in
+  `BLOCKS_GLOBAL_BY_DESIGN` with a written reason, and the second census does
+  the same for any per-block function that reaches an AI call. A **stale**
+  exemption fails too, because that is how a renamed function slips back
+  through. Both are noise-free today: the only two names on the list are
+  `emScope` (it IS the resolver) and `_akdEditorQuestion` (its blockId is
+  optional — the create page's answer-key panel has no block).
+- **A NEW BLOCK JOINS THE QUESTION ABOVE IT** (`emAdoptOwners`), which is where
+  the insert bar that made it was drawn — falling back to the one below when it
+  is the very first block on the sheet. Duplicating a block gives it a fresh id
+  and no owner, and it adopts the same way.
+- **NOTHING IS WRITTEN UNTIL SAVE, AND ONLY WHAT CHANGED IS WRITTEN.** Every
+  question is deep-copied in and compared against the signature taken the moment
+  the sheet finished rendering, so a paper of forty questions where two were
+  touched is two writes. The baseline is taken **AFTER** the first render and its
+  `syncEditorDomToBlocks()`, or the browser's own re-serialising of the markup
+  reports every question as changed on the very first save. It writes through
+  `saveQuestion`, mutating the bank question in place like `akeSave` — so every
+  field the editor does not own is preserved without `carryOverQuestionMeta`.
+- **THE RAIL IS THE SAME BUTTONS, MOVED.** A hoisted control is the original DOM
+  node with its handler intact, never a copy that calls the same function — which
+  is how the two come to disagree. It is safe because the action buttons are
+  driven by `data-` attributes and delegated listeners (`.improve-btn`,
+  `data-enhance`, `data-crop-open`, `data-annot-open`), so their position in the
+  card means nothing. **What cannot be moved is named**: a `.mic-btn` with no
+  `data-mic-block` finds the box it dictates into by walking up to
+  `[data-mic-wrap]`, so lifting it onto the rail lifts it away from that box.
+- **`EM_PRIMARY` says which half of a block STAYS.** Everything else folds into
+  `.em-extras` — hidden, never removed, and the ⚙ on the rail brings the whole
+  ordinary editor straight back. **A block type that is not in that table is left
+  exactly as it is**: `mcq`, `table`, `fillblank` and the widget builder are
+  controls the whole way down, so there is no "content" half to keep and hiding
+  the rest would hide the question. That default is what makes the feature safe
+  to extend.
+- **…but a panel a RAIL ICON OPENS folds for nobody** (`EM_KEEP`, v1.326.1).
+  🔑 Assign keywords renders its chip panel as a SIBLING of the answer box, so
+  the fold put it behind the very ⚙ the author had not pressed: the button lit
+  up and **nothing appeared** — the whole keyword feature dead in editing mode
+  and working perfectly everywhere else. `emStays(el, sel)` is the ONE place
+  that is decided, and anything a rail button REVEALS belongs in `EM_KEEP`
+  whatever block type it sits on.
+- **A SELF-CONTAINED PANEL keeps its own buttons, spelled out** (`EM_NO_HOIST_IN`).
+  Its controls act on what is IN the panel, not on the block, so on the rail
+  they read as block actions — the answer screenshot's *× Remove* beside the
+  block's own 🗑 is a second, differently-meaning bin, and 🔑 Keywords' own
+  *Clear all* / *Done* came out as a bare **C** and **D**, which is the panel
+  gutted as well as hidden. `emHoistable(btn)` is the ONE place a button's fate
+  is decided; the `.improve-btn` shrink sweep asks the same list, because those
+  two buttons wear that very class.
+- **The scroller is held across a render** (`emStashScroll` / `emRestoreScroll`).
+  Every edit that touches the block LIST — opening the 🔑 panel, adding, moving
+  or deleting a block, adding an MCQ option — goes through `renderBlocks`, which
+  empties `#blocksList`; an emptied list clamps its scroller to the top, so
+  opening a panel at question 30 threw the author back to question 1. `var`, not
+  `let`: `renderBlocks` sits far above this section and can run during module
+  evaluation.
+- **The 🖼 picture tools arrive a frame LATE.** `renderImgEnhanceBar` fills its
+  bar after `renderBlocks` has returned, so ✂️ Crop, ✏️ Touch up and ✨ Enhance are
+  lifted onto the rail by their own hook (`emCondenseEnhanceBar`) — and an
+  enhanced picture, whose single preview is replaced by a side-by-side
+  comparison living in the folded half, **opens the block** rather than showing
+  no picture at all.
+- **`body.em-editing` lifts every dialog editing mode can OPEN.** The touch-up
+  editor, the crop tool, the answer-key cross-check and the confirm cards are all
+  `.overlay` (z-index 300) — *below* this overlay (440) — so pressing ✏️ Touch up
+  would open an editor nobody can see. The class raises them for exactly as long
+  as editing mode is up, and never otherwise.
+- 👁 Preview, ✏️ Edit and 🖨 Print on the past-papers page all go through
+  **`_ppGo(go)`** and take the identical `(items, missing, title, opts)`, so the
+  three collect their questions with exactly the same code — an edit assembled
+  its own way is an edit of a different paper.
+- Run **`node tools/editing-mode-tests.mjs`** after touching any of it.
+
+## 🔲 A printed blank must not measure its own answer (v1.330.1)
+
+`_fbMergeBlankRuns` / `_fbSegments` / `FB_PRINT_SLOT_PT` / `FB_SLOT_CH` (in
+`app.js`, search `A RUN OF ADJACENT BLANKS IS ONE BLANK`), and the widths in
+`_fbPrintHtml`, `_fbPreviewHtml` and `buildOpenBody`'s `fillblank` case. **All three portals
+carry the same block byte-for-byte — ship a change to all of them together.**
+
+A worksheet asked *Name the two gases* and printed **one** rule for gas R and
+**two** rules side by side for gas S. Nothing was wrong on the page; the answer
+was simply on it. Two rules say *the answer is two words*, and next to a
+one-rule blank answered "oxygen" every child in the room can read off "carbon
+dioxide" without writing a word. The paper the question came from prints one
+blank of one length for each.
+
+Two things leaked, and both are silent — the sheet prints, the question is
+answerable, and the class has been handed the answer.
+
+- **THE COUNT.** An author blanks one word at a time (`fbToggleToken` works on
+  one token), so a two-word answer is two clicks and `[[carbon]] [[dioxide]]` in
+  the text. **`_fbMergeBlankRuns` folds a run of blanks separated by nothing but
+  whitespace into ONE blank** whose answer is those words joined — one rule on
+  paper, one box on screen, one row on the key, one answer to mark.
+  - **ONLY WHITESPACE MAY JOIN THEM.** `[[carbon]], [[dioxide]]` is punctuated
+    into two real answers and stays two: the comma is the author saying so.
+    Merging those would take an answer off the paper *and* off the key with
+    nothing anywhere to say it had gone.
+  - **Directly adjacent blanks join with NO space** — `[[car]][[bon]]` is
+    "carbon", because the sentence never had a space there either.
+- **THE WIDTH.** The length of a rule is a clue on its own, so **no rule is
+  measured from anything**. `FB_PRINT_SLOT_PT` (180pt, ~63mm — several
+  handwritten words) is one standard rule on paper and `FB_SLOT_CH` (22) one
+  standard box on screen, and every blank in the app gets them: the answer is
+  never read.
+  - **Sizing from the LONGEST answer in the block was the first attempt and
+    still leaks** — it just leaks per question instead of per blank. A question
+    whose answers are all short prints short rules, and the sheet becomes a page
+    of hints in the margins.
+  - **There is no formula left to get wrong**, which is the point: a class that
+    finds the rules too long or too short is one number to change.
+  - **The 🔑 keyword practice mode reads the same two constants** — its boxes
+    used to be the width of the word they hide, which spells the answer out as
+    plainly as printing it would.
+
+**`_fbSegments` is what every fill-in-the-blank surface reads; `_fbParse` stays
+the raw parser and MUST NOT merge.** The two language portals share `_fbParse`
+with the word-bank cloze, the open cloze and the editing passage, where two
+adjacent blanks are two separate answers — and an editing item is
+`[[wrong>>right]]`, so merging a pair of them would graft one item's correction
+onto the next one's misspelling. Every fillblank consumer goes through
+`_fbSegments`: the print builders, the student render, the answer key, the
+editor preview, the read-only render, the bank summary line. A consumer left on
+`_fbParse` is one surface still printing two rules while the others print one —
+and the key then numbers answers the page does not have.
+
+- Run **`node tools/fill-blank-tests.mjs`** after touching any of it.
+
+## 📝 An explanation is not the answer again (v1.332.0)
+
+`EXPL_ASKS_RE` / `_aiAsksToExplain` / `_explAnswerContext` / `_explDepthRules`
+/ `EXPL_TOKENS` (in `app.js`, search `AN EXPLANATION IS NOT THE ANSWER AGAIN`),
+read by the three explanation buttons and — through `_partsPromptRules()` — by
+every build prompt. **All three portals carry the same block — ship a change to
+all of them together.**
+
+The explanation box was told to write *"2-4 sentences explaining WHY the
+correct answer is correct"*. On an MCQ that is a real job: the answer is "(3)"
+and the explanation is everything else. On a question that ASKS the student to
+explain — *"… would the amount of gas R be higher, the same or lower? **Explain
+your answer.**"* — the model answer already IS the explanation, so "write the
+answer" and "explain why the answer is correct" are one instruction and the box
+came back as the answer a second time. Nothing errored; the answer key printed
+beautifully with its second half dead paper.
+
+- **`_explDepthRules(hasAnswer, asksExplain, level)` is the ONE place the rule
+  is said**, and every door reads it. A copy written into a prompt is a copy
+  that drifts, and the drift is invisible — one path keeps writing duplicates
+  while the other stops.
+
+### THREE DEPTHS, and only one of them is the default
+
+The first cut of this handed EVERY explanation box the full four-point
+teacher's commentary, and a printed key of thirty questions became unreadable —
+the fix for one fault straight into another. The depth is a decision the author
+makes per question now, on the two or three that are worth teaching from.
+
+| `level` | button | length | what it is |
+| --- | --- | --- | --- |
+| `''` | 🤖 **AI explanation** | 2-4 sentences | the note under the answer — the ONE thing the answer leaves out |
+| `'more'` | 📖 **Expanded (concise)** | 4-6 sentences | the four teacher's points, **one sentence each** |
+| `'full'` | 📚 **Expanded (long)** | 8-14 sentences | the same four worked through, reasoning stepped out, an example where it helps |
+
+- **The DEFAULT must stay the note.** It is the button pressed on nearly every
+  question, and it is the one that reaches the printed answer key en masse. The
+  numbered four-point list is deliberately absent from it — it names the three
+  candidates and says *pick the one that fits, NOT all of them*.
+- **`EXPL_POINTS` is written ONCE** and both expanded tiers share it; what
+  separates them is the tail (`EXPL_TAIL_MORE` says *at most one sentence for
+  each*, `EXPL_TAIL_FULL` says *step the reasoning out*). Two copies of the four
+  points would drift into two different lectures.
+- **An unknown `level` falls back to the DEFAULT**, never to the lecture — a
+  typo must not put every box back on the long one.
+- **NO answer yet returns the EMPTY STRING at the default depth**, so an MCQ's
+  prompt is byte-for-byte what it always was. That case was never wrong, and
+  telling a model not to repeat an answer that does not exist is how an
+  explanation comes back refusing to say what the answer is. Pressing 📖 or 📚
+  IS an explicit ask for more, so those do get a rule even with no answer —
+  minus the do-not-repeat lines, since there is nothing to repeat.
+- **Three attributes, not three values of one.** `data-aiexplain` /
+  `data-aiexplain-more` / `data-aiexplain-full`, so `closest('[data-aiexplain]')`
+  cannot match the other two and no two listeners can fire on one press.
+- **NO BUILD PATH MAY REACH AN EXPANDED TIER.** ⚡ Rapid add, 📄 Exam Paper and
+  the bulk import write forty explanations in one run; the three listeners are
+  the only callers that pass a level at all, and the harness counts them.
+
+### …and the rule the depths share
+
+- **With an answer written**, the box is told not to restate or paraphrase it —
+  at every depth. When the question ITSELF asks for an explanation it also says
+  so in as many words: the model answer is *already* an explanation, so this one
+  has to say something it does not.
+- **It never licenses contradicting the answer.** The existing *"your
+  explanation MUST justify THAT answer (never contradict it)"* line stays and
+  comes first; going beyond an answer is not disagreeing with it.
+- **The budget moves with the depth** (`EXPL_TOKENS`: 700 / 1200 / 2200). A
+  prompt that asks for 8-14 sentences inside the 700-token ceiling returns a
+  half-written explanation, which is worse than a short one.
+- **`_explAnswerContext` reads THIS part and no other.** Only this part's answer
+  is the one this box would be repeating, so another part's answer never counts
+  — but the instruction to explain is often printed ONCE in the shared stem, so
+  the stem does count while another PART's wording does not.
+- **The build prompts carry it too**, and that is where most of the duplicated
+  explanations in the bank came from: ⚡ Rapid add, 📄 Exam Paper and the bulk
+  import write the answer and its explanation in ONE call, so `_partsPromptRules()`
+  states the rule and all four build prompts get it without being told twice.
+  What it asks them for is the **2-4 sentence note** — a paper of forty long
+  explanations is exactly the fault the three depths exist to prevent.
+- Run **`node tools/explanation-depth-tests.mjs`** after touching any of it.
+
+## 📄 A paragraph break is a blank line, everywhere (v1.333.0)
+
+`_nlToBrHtml` / `_keepParagraphGaps` / `escapeHtmlKeepLines` (in `app.js`,
+search `A PARAGRAPH BREAK IS A BLANK LINE`), plus the
+**AUTHORED PARAGRAPHS KEEP THEIR SPACING** rules in `index.html` — one block on
+screen and one inside `@media print`. **All three portals carry the same block
+— ship a change to all of them together.**
+
+An author separates two paragraphs in the editor and sees the gap. The printed
+worksheet, the answer key and the student's own screen ran them together — so
+the app and the paper disagreed about the shape of the question, and only the
+shape was lost, which is why nobody notices until a sheet is in front of a
+class.
+
+**Three things did it, and each is silent on its own.**
+
+- **`* { margin: 0 }`** at the top of `index.html` zeroes every margin, `<p>`
+  included. That reset is deliberate and stays; what was missing was giving the
+  paragraphs back **on the containers that render AUTHORED html, and only
+  those** — `.content-editable`, `.qp-qtext`, `.preview-block`,
+  `.post-explanation`, `.ak-fullcontent`, and their printed twins. A bare
+  `p { … }` would move every card, banner and dialog in the app instead.
+  `.preview-content p` had carried its own `margin-bottom` for years, which is
+  exactly why the read-only preview showed the gap and nothing else did.
+- **`escapeHtmlKeepLines`** — what both print builders flatten a text block
+  with — turned `</p>` into ONE newline and then **dropped every blank line**
+  (`.filter(l => l.length)`), so a paragraph break could not survive to paper
+  even in principle.
+  - **A `<br>` is a line break INSIDE a paragraph; a closing BLOCK tag ends
+    one.** That is the distinction the editor's own Enter / Shift+Enter already
+    makes, so honouring it is what makes the page match what was typed. `</p>`,
+    `</div>` and `</h1-6>` are worth a blank line; **`</li>` and `</tr>` are
+    one line each** — a gap between every option of an inline list is a
+    question that no longer reads as a list.
+  - **`_keepParagraphGaps` is the ONE place the blank lines are kept**: a RUN
+    of them is one gap (markup very often ends a paragraph AND carries a typed
+    newline), and the ones at either end are the markup's own trailing break
+    rather than spacing anybody put there — a trailing one pads the bottom of
+    every text block on the sheet.
+  - **One paragraph is byte-for-byte unchanged**, which is the overwhelming
+    majority of the bank.
+- **The AI writers collapsed `\n+` into a single `<br>`**, so an explanation
+  the model wrote as two paragraphs arrived as one block of text.
+  **`_nlToBrHtml` is the ONE door** for escaped-text-with-line-breaks, and all
+  three writers (the answer, the explanation, ✨ Improve / ✂️ Shorten's setter)
+  go through it. The harness fails on a surviving `\n+` collapse anywhere in
+  the file, because one path left behind is one path that quietly still flattens
+  what the model wrote.
+
+The print rule sits **inside `@media print`** on purpose: the planner and the
+live A4 preview copy the stylesheet and UNWRAP that block, so a rule left
+outside it would be measured differently from how it prints. The extra height
+re-paginates for free — the planner MEASURES the finished page.
+
+- Run **`node tools/paragraph-spacing-tests.mjs`** after touching any of it.
+
+## 🎙️ Transcription — ONE MODEL, ONE DOOR (v1.334.0)
+
+`AI_TRANSCRIBE_MODEL` / `AI_TRANSCRIBE_DOWN_MS` / `TRANSCRIBE_PROMPT` /
+`_transcribeModelGet` / `_transcribeClean` / **`transcribeAudio`** /
+`transcribeRouteNote` (search `TRANSCRIPTION — ONE MODEL, ONE DOOR`).
+**Every Polymath app that turns speech into text carries this same block —
+ship a change to all of them together.**
+
+Speech is its own job and it now has its own model. `gemini-3.5-transcribe`
+reads every recording this app turns into text — the mic on a marking guide,
+the mic on an open answer, the mic in Ai-nstein's chat — through
+`transcribeAudio`, which is **the ONE door**. A call site that reaches past it
+to `askGeminiVision` is a surface still transcribing on the general chat
+model, and **nothing on any screen would say so**: the words come back either
+way, a little worse.
+
+- **THE MODEL IS A ROUTE, NOT A PROMISE.** A model id is a thing that gets
+  renamed, withdrawn and rolled out region by region, and an id this project
+  cannot reach is a 400/404 on **every** dictation — which reads as "the mic
+  is broken" rather than "that id is a release out of date". So the transcribe
+  model is tried FIRST with the ordinary model behind it, a refusal is
+  remembered for `AI_TRANSCRIBE_DOWN_MS` rather than paid for again on the
+  next recording, and a success clears the mark — so the day the id starts
+  answering, the app starts using it with nothing redeployed and nobody told.
+- **NO THINKING LEVEL IS SENT.** Every other call in this app carries
+  `thinkingConfig`, and a level a model does not know is a 400 — no answer at
+  all, not a worse one. A speech model has no reason to know the chat models'
+  scale, so the one call that could break it is deliberately not made.
+  Transcription is reading, not reasoning.
+- **The transcription is NOT grounded in the teaching notes**, and that is a
+  decision rather than an oversight: a transcriber told what the answer ought
+  to say writes that down instead of what was actually said. It is exempted by
+  name in the census, with that reason written beside it.
+- **The page SAYS which model answered.** `transcribeRouteNote()` is printed
+  in the AI Engine panel, because an app quietly dictating on the chat model
+  looks exactly like one using the speech model, only a little worse.
+
+## 🪄 Tell the AI what to change — the command box in the question creator (v1.335.0)
+
+`QCMD_*` / `qcmdNeedsRedraw` / `qcmdChangesFor` / `qcmdDiagramPrompt` /
+`qcmdDiagramPromptRules` / `qcmdSummary` / **`qcmdRedrawDiagram`** / `qcmdRun`
+(search `TELL THE AI WHAT TO CHANGE`), plus the `#qcmdPanel` box at the top of
+the question editor. **All four portals carry the same block — ship a change to
+all of them together; the image door here is
+`generateCleanEnhancedImage`, so a redrawn figure takes the paper-clean pass
+like every other diagram re-render in this app.**
+
+A box in the creator: say what you want different, and the question open in
+front of you comes back as a NEW one. What is typed decides the wording — and
+where the new wording no longer fits the figure, **the picture is REDRAWN FROM
+THE PICTURE ALREADY ON THE QUESTION** rather than invented from nothing.
+
+- **THE ORIGINAL IS NEVER TOUCHED.** The variant is loaded back into the editor
+  as a new question (the editing id is cleared), so Save adds one rather than
+  overwriting the question it came from, and nothing reaches the bank until the
+  author presses Save. That is the whole reason this is a box in the creator
+  rather than a button that writes a copy behind the author's back — a wrong
+  instruction costs one glance, not a question.
+- **THE PICTURE IS AN EDIT, NEVER A NEW DRAWING.** The existing figure is the
+  reference image on every image call and `QCMD_DIAGRAM_RULES` pins everything
+  the change does not name: the layout, the drawing style and line weight, the
+  lettering, the labels, the proportions and the aspect ratio. A figure drawn
+  from scratch comes back as a fresh picture of roughly the same thing, in a
+  different style and at a different size — which is exactly what an author
+  holding a scanned exam figure does not want. `qcmdRedrawDiagram` is the ONE
+  door a picture is redrawn through.
+- **WHICH PICTURE a change belongs to is POSITIONAL.** `diagramChanges` carries
+  one entry per picture, in order, and `qcmdChangesFor` pads a short reply on
+  the RIGHT and cuts a long one — so a model that answers about picture 2 alone
+  can never have that change applied to picture 1. The wrong figure redrawn is
+  the mistake nothing on screen would reveal: both pictures still look like
+  perfectly good pictures.
+- **A NON-ANSWER IS NOT AN INSTRUCTION.** Asked what must change, a model says
+  "none", "-", "N/A" and "no change" at least as often as it returns an empty
+  string, and any of those handed to the image model is a word painted into the
+  figure — plus an image call spent redrawing a picture that was already right.
+  `QCMD_NO_CHANGE_RE` knows them all, and `qcmdNeedsRedraw` refuses anything
+  that is not a STRING: `String()`-ing a number or an object would send "12" or
+  "[object Object]" to be drawn.
+- **A PICTURE THAT COULD NOT BE REDRAWN IS KEPT, AND SAID SO IN WORDS**
+  (`qcmdSummary`). A question whose new wording talks about a figure still
+  showing the old numbers prints perfectly and is only found in front of a
+  class, so a refused or failed redraw is reported rather than swallowed. It is
+  never dropped either — a question with no figure at all is worse than one
+  with the old figure.
+- **An EMPTY box is refused.** This box exists so the author says what they
+  want; a silent default is a question nobody asked for.
+- **`_regenPrompt` asks for `diagramChanges` only when the question HAS
+  pictures**, so an ordinary text-only regenerate keeps asking for exactly what
+  it always asked for.
+- **`qcmdBuildVariant` is the ONE builder**, and 🔄 Regenerate on a saved
+  question goes through it too — so the bank-side copy gained the redrawn
+  figures without a second copy of any of this. It re-attaches the ORIGINAL
+  pictures BEFORE anything is redrawn: a redraw is an edit of the picture that
+  was there, so the picture has to be there first.
+- **The keywords a person marked are cleared** on the way into the editor: they
+  are word POSITIONS in the old wording and point at different words in the new
+  one. So is the answer-key picture, which was drawn for the old figure.
+- Run **`node tools/ai-command-tests.mjs`** after touching any of it.
+
+
+## 🎓 The LEVEL LADDER — P3 → P6 → S1, and secondary is its own BAND (v1.340.0)
+
+`TOPIC_LEVELS` / `LEVEL_ORDER` / `LEVEL_CODE_RE` / `LEVEL_MIN` / `LEVEL_MAX` /
+`isLevelCode` / `isSecondaryLevel` / `levelFromNumber` / `levelOptionsHtml` /
+`audienceFor` / `schoolFor` / `getLevelNumber` (in `app.js`, search
+`THE LEVEL LADDER`), plus the S1 rows in `topicLevelMap`, `topicsByLevel`,
+`levelColors` and `topicEmojis`, the `S1` options in `index.html`, and
+`LEVEL_ORDER` in **`fps.html`**, which reads the bank directly and applies its
+own copy of the cap.
+
+Secondary 1 is a level like any other. **A level is a RUNG, not a number sliced
+out of the string** — `parseInt('S1'.replace('P',''))` is **1**, which files
+every Secondary 1 question BELOW P3 and serves it to the youngest child in the
+school. So the order lives in ONE map and every comparison goes through
+`getLevelNumber` / `levelFromNumber`.
+
+- **`isLevelCode` replaced every `/^P[3-6]$/` typed out at a call site.** That
+  regex rejects `'S1'`, and there were fifteen of them — a student's assigned
+  level, a family's declared level, the admin's roster picker, the AI's
+  recommended level. Each one it survives is a screen where a Sec 1 assignment
+  is silently thrown away and the account falls back to the default, which
+  renders perfectly and says nothing.
+- **SECONDARY IS OPT-IN, and `studentCapLevel` is the ONE gate** (v1.339.0).
+  Every serving surface asks it through `qWithinStudentLevel` / `studentCapNum`,
+  so the two rules below hold everywhere at once rather than in whichever call
+  sites somebody remembered:
+  1. **An unassigned student is capped at `LEVEL_DEFAULT_CAP`** — the top of
+     PRIMARY, derived from the ladder, never `LEVEL_MAX`. The whole P3–P6
+     roster has no level set and nobody is going to go round and set them all;
+     capping at the top of the ladder opened the Sec 1 bank to every one of
+     them the moment the first S1 question was saved.
+  2. **A secondary cap is the TEACHER's to grant**: `currentUser.level` may
+     carry S1 only when `currentUser.adminLevel` — the level assigned on the
+     Usage page — is secondary too. `currentUser.level` is also fed by the
+     FAMILY profile, whose dropdown a parent fills in themselves, and by a
+     `servingLevel` this app wrote in an earlier session; without that line,
+     picking "S1" from their own dropdown is a P6 child helping themselves to
+     the Sec 1 bank.
+  Both **fail CLOSED**: a refused profile read leaves `adminLevel` empty and the
+  student on primary. That costs a real Sec 1 student some questions until the
+  read succeeds; the other direction serves Secondary 1 science to a
+  nine-year-old.
+- **A CAP IS A CEILING FOR PRIMARY AND A BAND FOR SECONDARY** — `levelBandMin`
+  / `qInLevelBand` / `levelsInBand` / `studentBandMinNum` (v1.340.0). P3–P6
+  build on each other, so a P6 child revising P4 work is the point and their
+  band opens at the bottom of the ladder. **Secondary is a different syllabus,
+  not more of the same one**: a Sec 1 student served P4 questions is not
+  revising, they are in the wrong school year — so a secondary cap is a band of
+  secondary levels ONLY. `levelBandMin` is the ONE place that is decided, and
+  every surface that compares a level asks it: `qWithinStudentLevel`,
+  `clampToStudentLevel`, `buildQpQueue`, `getQuestionsForLevel` (which takes a
+  level rather than reading `currentUser`, so it states the rule from that end),
+  `applyStudentLevelCaps`, the topical-practice grid and both Ai-nstein
+  recommendation prompts.
+  - **`qWithinStudentLevel` must return early for a NON-STUDENT.**
+    `studentCapLevel` returns `LEVEL_MAX` for an admin and **`LEVEL_MAX` is
+    secondary**, so running an admin through the band shows them Sec 1 questions
+    and nothing else — the whole primary bank gone from the app at a stroke.
+  - **`levelsInBand` gives a student their OWN half of the ladder.** Primary is
+    not a level a Sec 1 student unlocks by picking a higher one, and S1 is
+    granted by the teacher rather than chosen, so "Locked — select a higher
+    level to unlock" is a lie in both directions; six greyed-out primary
+    sections above a Sec 1 student's single S1 one reads as the app being
+    broken. `fps.html` carries the same rule as `studentLevelFloor`.
+- **`LEVEL_MAX` is the top of the LADDER** — what `levelFromNumber` clamps to,
+  and the cap for anyone who is not a student (an admin sees every question).
+  It is not the unassigned cap; keeping the two apart is the whole opt-in rule.
+- **`fps.html` has its own copy of the cap and needs BOTH rules**, or it is the
+  way round the gate: it reads the bank directly. `LEVEL_CAP_DEFAULT` is set
+  before the profile read so every failure leaves a student on primary, and only
+  `d.level` may raise the cap past it. Its *unknown-topic* fallback stays at
+  **P6**, matching `getTopicLevel`, or a question filed under a topic nobody
+  recognises would vanish from every P6 student's run.
+- **`rosterEffectiveCap` states the same rule for the ADMIN's roster.** A
+  dashboard reporting a child as being on Sec 1 while the app quietly serves
+  them primary is unfalsifiable from that page. It also killed a display bug of
+  its own: `'P' + Math.min(parseInt(level.slice(1)))` reported a Secondary 1
+  child as serving **"P1"**, because `'S1'.slice(1)` is `"1"`.
+- **`getQuestionsForLevel` and Snap & Mark were the two uncapped surfaces.** The
+  first read only `q.topic`, so a Sec 1 SECONDARY topic rode into a P4 session
+  behind a primary one; the second matched a student's photograph against the
+  whole bank with no level cap at all.
+- **EVERY RUNG NEEDS A BUCKET — `_emptyLevelBuckets`** (v1.339.1). This is the
+  one that actually broke a paper. `currentTopicsByLevel` built a literal
+  `{ P3, P4, P5, P6 }`, so the moment a topic was filed at S1 it pushed onto
+  **`undefined`** — a TypeError inside the ONE function every authoring prompt
+  calls. ⚡ Rapid add then failed EVERY page of EVERY paper with *"Cannot read
+  properties of undefined (reading 'push')"*, and 🤖 Build from screenshot with
+  it, which reads as a PDF the app could not open rather than as a missing
+  bucket. Anything grouping topics by level starts from `_emptyLevelBuckets()`,
+  never from a literal, and skips a level that is not on the ladder rather than
+  throwing on it. The bank's own topic filter carried the same literal and threw
+  on `byLevel[lv].length` a moment later, filing every S1 topic under P6 on the
+  way. **The harness had passed the whole time, because its fixture STUBBED the
+  function that crashed** — it cuts the real one now.
+- **`levelGroupLabel`** spells a level out: `'Primary ' + lv.slice(1)` reads
+  "Primary 1" for S1.
+- **`levelOptionsHtml` is the ONE builder every level dropdown goes through.**
+  Six `<select>`s used to write out P3…P6 by hand, so a level added to the
+  ladder would appear in whichever ones somebody remembered. The blank "—" row
+  is opt-in (`blankLabel`): a picker that quietly offers "no level" where none
+  was asked for lets a student be saved with no cap at all.
+- **THERE IS NO `q.level` FIELD.** A question's level is read off its TOPIC
+  (`getTopicLevel` → `qLevelNum`, which takes the MAX over `topic` and
+  `topic2`), so filing a question at S1 means giving it an S1 TOPIC — which is
+  exactly what ⚡ Rapid add's batch level does by narrowing the topics the AI
+  may choose from. Ten Sec 1 topics ship; anything a school teaches differently
+  is one line in ⚙ Manage topics, which files a custom topic under S1 like any
+  other level.
+- **A prompt must never tell the model a Sec 1 question is primary**
+  (`audienceFor` / `schoolFor`). This is the one way adding S1 could look like
+  it worked and not have: the question is filed at the right level and the AI
+  writes P3 science into it. Where the level is already in hand the prompt names
+  the year outright — the 🤖 answer and 📝 explanation buttons (off the
+  question's topic), the vetting builder (off `q.topic`) and every ⚡ Rapid add /
+  🤖 build-from-screenshot call (off `levelHint`); everywhere else the audience
+  line names the whole ladder rather than just primary.
+- **`LO_LEVELS` is `TOPIC_LEVELS`**, so a Sec 1 🎯 objective can be written.
+  Nothing is seeded for S1 — `SYLLABUS_LO_TOPICS` is the *Primary* syllabus's
+  own outcomes — so the level starts empty and is filled in by hand.
+- Run **`node tools/subject-level-tests.mjs`** and
+  **`node tools/syllabus-tests.mjs`** after touching any of it.
+
+## ▦ The table block — PowerPoint's own set, and a table read off a screenshot (v1.341.0)
+
+`_tblInsertRow` / `_tblDeleteRow` / `_tblInsertCol` / `_tblDeleteCol` /
+`_tblRemapCellKeys` / `_tblCellCss` / `TABLE_STYLE_PRESETS` / `TABLE_FONTS` /
+`_tblFromAi` / `tblBuildFromShot` (in `app.js`, search
+`A ROW OR COLUMN IS INSERTED, NOT JUST APPENDED` and
+`A TABLE READ OFF A SCREENSHOT`), plus the `.tbl-grip-*` / `.tbl-shot-*` CSS in
+`index.html` and the grips inside the editor table.
+
+The table block already had merges, fills, text colours, padding, borders and
+drag-to-resize. What it did **not** have was the two things an author actually
+does: put a row in the MIDDLE of a table, and get a printed table into the app
+without typing it out.
+
+### A row or column is INSERTED, not just appended
+
+- **Everything about a table except its text is keyed BY POSITION** —
+  `cellStyles["2_3"]`, `cellPadding["2_3"]`, `rowHeights[2]`, `colWidths[3]` and
+  every merge rectangle `{sr,sc,er,ec}`. So a row put in at the top of a
+  five-row table has to carry four rows' worth of colour, padding, height and
+  merges down with it. Miss that and **the table still renders perfectly** — the
+  author's shading is simply one row out, which is only ever found by reading it.
+- **The four `_tbl*` functions are the ONE place that remapping happens**, and
+  every button goes through them: ↥ Above, ↧ Below, ↤ Left, ↦ Right, 🗑 Row,
+  🗑 Col, and `+ Row` / `+ Col`, which are now "insert at the end". Two of them
+  written separately is how "insert above" and "add row" come to disagree.
+- **A merge the new row lands INSIDE grows; one below it moves down.** Shifting
+  every merge unconditionally tears a merged heading off the cells it covers.
+  On a delete, a merge left covering a single cell is **dropped** — `isCellMerged`
+  would otherwise hide real cells behind a rectangle that is no longer a merge.
+- **Rows are deleted from the BOTTOM up.** Deleting row 0 first renumbers
+  everything under it, so the second index in the list then names a different row.
+- **The last row and the last column are never deleted.** A table with no cells
+  renders perfectly and cannot be edited.
+
+### Colouring a ROW or a COLUMN is one click
+
+- **The grips are the feature.** A `<thead>` row of `A B C …` above the columns
+  and a leading `1 2 3 …` cell down the rows; clicking one takes the whole
+  column or row (Shift/Ctrl-click adds another). Selecting a cell and then
+  pressing "Row" still works — this is the same selection set, reached faster.
+- **A grip lights up only when EVERY cell of its row is selected.** A half-lit
+  grip would say the row is taken when colouring it would miss two cells.
+- **The grips are in the EDITOR table only.** The read-only and printed tables
+  are built by `renderTableReadonly`, a different function, which never sees them.
+- **The grip column is colgroup's `col` 0 and is NOT one of the table's own
+  columns**, so `initTableResizeHandles` and `tableSetColWidth` both drop it
+  before mapping a `<col>` back to `block.colWidths`. Leave it in and every
+  resize handle drags the column to the LEFT of the one it is sitting on.
+
+### One serialiser for a cell's look
+
+**`_tblCellCss` is what the editor table and the printed table BOTH call.** They
+are two different functions, and a property rendered by one and not the other is
+the quiet failure this prevents: the author sets a font face on screen, the
+worksheet prints without it, and nothing anywhere says so. `fontFamily` (the new
+👤 Font ▸ Face picker) and `fontWeight` (the cell-level **B▪**, which is a bolded
+CELL rather than a bolded word) reach print because of it. A cell nobody has
+styled still serialises to the empty string, so the overwhelming majority of the
+bank renders byte for byte as it always did.
+
+### Table styles are REAL cell colours
+
+`TABLE_STYLE_PRESETS` writes into `cellStyles` rather than setting a flag each
+renderer would have to interpret, so **a preset prints exactly as it looks**. It
+touches only the two things a table style owns — the background and the weight —
+so an alignment or a colour the author set by hand survives it. ⌫ Format is the
+opposite and clears formatting on the selection while **leaving the text**: an
+author who loses a column of typing to it will not press it twice.
+
+### 📸 A table read off a screenshot
+
+Paste a screenshot of a printed table onto the block and the model reads the
+grid — cells, merged headings, alignment — and fills the block in.
+
+- **It is a TRANSCRIPTION, which is why it is not grounded in the teaching
+  notes** (it is exempt by name in `tools/teaching-notes-tests.mjs`). A reader
+  told what the table OUGHT to say writes that down instead of what is printed,
+  and that is the one failure here that looks exactly like success. The prompt
+  says so in as many words, twice: transcribe, do not improve; never fill a
+  blank cell in.
+- **NOTHING IS WRITTEN UNTIL THE QUESTION IS SAVED.** The reply lands in the
+  block in front of the author, who can fix a cell or press undo; no path here
+  goes near the bank. The pad says out loud that a transcription can be wrong.
+- **`_tblFromAi` clamps and PADS.** Every row is padded to exactly `cols`
+  strings and cut at it: the renderer walks `block.cols`, so a ragged
+  `block.data` silently drops cells rather than raising anything. A reply with
+  no table at all is an **error**, never an empty table — an empty table reads
+  as a screenshot that worked.
+- **A cell is HTML, so it is filtered to `<b> <i> <u> <sup> <sub> <br>` with
+  every attribute stripped.** That string is written into a contenteditable and
+  printed onto a worksheet. Superscripts and subscripts are kept because a
+  science table is full of `cm³` and `H₂O`.
+- **A merge outside the grid, a one-cell "merge", and the second of two
+  overlapping merges are all dropped** rather than pushed in.
+- **The block is REPLACED, not merged into**: a 3×3 table's leftover colours and
+  merges laid over a 6×5 one read as formatting nobody chose.
+- Run **`node tools/table-editor-tests.mjs`** after touching any of it.
+
+## 🚦 The traffic light — one question's health at a glance (v1.343.0)
+
+`tl*` / `TL_*` (in `app.js`, search `THE TRAFFIC LIGHT`), plus the `.tl-*` CSS
+and `#tlOverlay` in `index.html`, the lamp on every Question Bank row and
+picture tile, the lamp on every question heading in ✏️ editing mode, and
+🚦 **Check all questions** in editing mode's own bar.
+
+✅ Check Questions serves questions back ONE at a time, newest first, and is
+worked through like a queue. That is the right shape for reading the day's new
+questions and the wrong shape for the two things a teacher actually asks in
+front of a list: *is THIS question all right?* and *is anything wrong anywhere
+on this sheet?* Answering either meant opening the queue and hoping the
+question came round. A lamp answers both at a glance — 🔴 something is wrong,
+🟡 worth a look, 🟢 nothing was flagged.
+
+- **IT IS THE SAME CHECKER, NOT A SECOND ONE.** `tlRun` calls
+  `_cqLocalFindings` and `_cqAiCheck` — ✅ Check Questions' own two layers — so
+  the lamp and the queue can never disagree about the same question, and the
+  headline check (options that repeat the picture) is made here for free. A
+  prompt written for this feature would be a second prompt to improve, and the
+  two would drift the week after they shipped. The harness fails on an
+  `askGemini` anywhere in the block.
+- **AN UNLIT LAMP IS NOT A GREEN ONE, and this is the only failure that
+  matters.** The lamp is read at a glance, on a list of forty questions, by
+  somebody about to print them. So a question nobody has checked is a hollow
+  grey ring that says *not checked yet*; only a check that really ran and
+  really found nothing turns green. Drawing "not checked" the same as "checked
+  and clean" is the whole feature quietly inverted.
+- **A LAMP GOES OUT WHEN THE QUESTION CHANGES.** `tlSig` signs everything the
+  check reads — title, topic, category, the annotation flag and the blocks —
+  at the moment the verdict was formed; a verdict that no longer matches is
+  reported as `stale`, drawn as the SAME grey ring, and says the question has
+  been edited since. In editing mode the author is typing into the very
+  question the lamp is about, so without it a green lamp sits above wording
+  that has since been rewritten. **And it signs nothing else**: a lamp that
+  went out every time a question was re-tagged or marked read is a lamp nobody
+  would bother with. It does **not** keep the whole question — one signature
+  per question lives as long as the page does, and a question carrying a
+  pasted picture is a data URL megabytes long — so it is the length, a hash of
+  every character and a verbatim head. A plain truncation would be the silent
+  version of that saving: an edit past the cut would leave the lamp green.
+  Typing fires no render, so one debounced `input` listener
+  (`tlEmWatchInit`, bound ONCE on the document — the sheet's DOM is rebuilt
+  continuously) syncs and repaints.
+- **THE VERDICT IS PLAIN CODE.** `tlVerdict` maps findings to a colour and
+  never asks a model: high → 🔴, anything else → 🟡, nothing → 🟢. The same
+  findings must always give the same lamp, and a colour a model chose could
+  disagree with the list printed under it. A **low** finding is still amber —
+  *No topic set* is a real thing to fix, and a green lamp with a finding
+  printed under it is the lamp contradicting its own panel.
+- **THE STRUCTURAL HALF IS FREE, SO IT ALWAYS RUNS**, and an AI failure is its
+  own state (⚠, never green) carrying whatever the instant checks found. "The
+  check could not run" and "the check found nothing" are opposite things, and
+  AI being off on the device is one of the two.
+- **`tlRepaint` IS THE ONE PAINTER.** Every lamp carries `data-tl-id` and
+  `data-tl-scope`, so it finds them by attribute rather than being told where
+  they are — the bank's rows, its tiles and editing mode's headings are all
+  repainted by one call, and a surface added later gets it for free. Both
+  renderers call it at the end, because the cache outlives the render.
+- **`tlQuestionFor` decides WHAT a lamp is about, and the `em` scope reads what
+  is ON SCREEN.** In editing mode the wording lives in contenteditable boxes
+  and the unsaved edits are the paper in front of the teacher, so
+  `tlEmQuestion` builds the question from `emBlocksOf` and the heading's own
+  title over the bank copy's meta; checking the saved version would light a
+  question nobody is looking at. Every entry point syncs the boxes first
+  (`tlEmSync`).
+- **🚦 CHECK ALL IS ONE CALL PER QUESTION, `TL_PAR` AT A TIME.** A whole paper
+  asked for in one reply truncates — and worse, comes back as findings that
+  cannot be attributed to the question they belong to. So "check them all
+  together" means checking each of them at once, the same shape 🔍 Answer key
+  cross-check uses. A verdict that already stands is not paid for twice,
+  `TL_MANY_MAX` bounds one press, and ⏹ Stop is honoured between questions.
+- **The summary bar counts the lamps standing NOW, not the run's own tally**, so
+  a question fixed after the run drops out of the count instead of sitting
+  there red. It must set `display: 'flex'` and never `''` — `.em-tlbar` is
+  `display: none` in the stylesheet, so clearing the inline style leaves a bar
+  that never appears on a run that otherwise worked perfectly.
+- **The panel is ONE dialog** (`#tlOverlay`) opened from any lamp anywhere, and
+  it renders its findings through `_cqFindingHtml` — the same rows ✅ Check
+  Questions draws, so a finding reads the same wherever it is met, and its
+  ＃ one-tap fix comes along. It sits at `z-index: 480`, above ✏️ editing mode
+  (440), which is what opens it.
+- **It READS ONLY.** Nothing in the block writes a question; ✏️ **Fix this
+  question** opens the editor, or scrolls to the question when the sheet is
+  already on screen.
+
+### …and on the CREATE page, the ONE question in the editor (v1.346.0)
+
+`tlCreateActive` / `tlCreateQuestion` / `tlCreateSync` / `tlSyncScreen` /
+`tlRenderCreateBar` / `tlCreateWatchInit` / `tlFixCreateOptions` / `tlDraftId` /
+`tlWordFor`, plus `#tlCreateBar` in the create page's header and the
+`.tl-light.wide` pill.
+
+A question is checked at the moment it is written, not only once it is in a
+list — so the same lamp sits in the create page's header, on whatever question
+is open in that editor. It is the SAME `tlRun`, the same panel and the same
+findings; nothing here is a second checker.
+
+- **IT MUST STAND DOWN IN ✏️ EDITING MODE**, and this is the failure to design
+  for. That is the trap `_akdEditorQuestion` documents: with the sheet open the
+  global `blocks` is the WHOLE PAPER and the create page's own `#questionTitle`
+  / `#topicSelect` still hold whatever question was last open THERE. A lamp
+  drawn from that describes no question that exists — and it looks perfectly
+  healthy. `tlCreateActive()` is the ONE place that is decided.
+- **A DRAFT HAS NO ID, and a verdict is keyed by one.** An unsaved draft is
+  checked under one fixed id (`tlDraftId()`), and it needs **no reset hook**:
+  the SIGNATURE is what decides whether a verdict still stands, and clearing
+  the editor changes every word of it. Hooking the eight paths that reset the
+  editor would be eight chances to forget one, and the one forgotten leaves the
+  last draft's green lamp standing over the next question.
+- **A question opened FROM the bank keeps its real id**, so checking it in the
+  editor and pressing Save leaves the bank row already lit — and while the
+  edits are unsaved the bank row reads *stale*, which is honest: that verdict
+  describes the draft, not the saved copy.
+- **AN EMPTY EDITOR IS NEVER CHECKED.** `_cqLocalFindings` finds nothing wrong
+  with a question that has nothing in it, so a blank page would light **green**
+  — the whole feature inverted by pressing the button. `tlClick` refuses and
+  says why.
+- **`tlCreateQuestion` reads exactly the five fields the check reads** — title,
+  topic, category, annotation, blocks — which is exactly what `tlSig` signs. No
+  more, or the lamp goes out over something the check never read.
+- **THE ＃ ONE-TAP FIX IS ROUTED BY SCOPE** (`_cqFindingHtml(f, qid, scope)`).
+  `cqNumberOptions` writes STRAIGHT TO THE BANK, which is the wrong thing
+  entirely here: a draft that has never been saved is not there at all, and one
+  that has must not be rewritten behind an author who has not pressed Save.
+  `tlFixCreateOptions` writes the editor's own blocks and nothing else.
+- **✏️ Fix this question must handle the create scope BEFORE `editQuestion`.**
+  That call would load the SAVED copy over the very edits the check was run on.
+- **THE PAINTER SWAPS THE STATE CLASS, it does not rewrite `className`.** A
+  lamp carries layout classes of its own — `sm` on a bank row, `lg` in the
+  panel, `wide` here — and rebuilding the list from the state alone leaves the
+  lamp its colour and takes its shape away. A labelled lamp keeps its dot in
+  `.tl-dot` and its words in `.tl-txt` for the same reason: writing the
+  element's whole `textContent` rubs the label out.
+- **Typing fires no render**, so one delegated `input`/`change` pair on
+  `#page-create` (`tlCreateWatchInit`, bound beside `dupWatchBind`) syncs and
+  repaints — the same shape the duplicate watch uses, and for the same reason.
+  `setEditMode` is the other hook: it is the one function every route into and
+  out of the editor goes through.
+- **`tlRenderCreateBar` is wrapped in try/catch** because `navigateTo` and
+  `setEditMode` both run during module evaluation, when the consts it reads are
+  still in their temporal dead zone. A lamp that is not there yet is not worth
+  taking the app down for.
+- Run **`node tools/traffic-light-tests.mjs`** after touching any of it.
+
+## 📋 Format check — every past-paper question dressed for the paper (v1.345.0)
+
+`pf*` / `PF_KINDS` (in `app.js`, search `FORMAT CHECK`), plus `#pfOverlay` in
+`index.html`, the `.pf-*` CSS in `ppStyles()`, the 📋 **Format check** button
+beside 👁 / ✏️ / 🖨 on every year of 📄 Past Papers, and 📋 **Format check —
+all papers** at the top of the concepts card.
+
+A PSLE paper is printed with its answer key and marked from it, so every
+question on it has to carry three things a question in the ordinary bank can
+do without: **an explanation for every part**, **keywords assigned**, and
+**marks on every part**. Each is silent when missing — the question builds,
+renders and prints perfectly — so one button per paper says which questions
+are missing which, and takes the author straight to them.
+
+- **IT IS PLAIN CODE, INSTANT, AND READS ONLY.** Every check is a fact about the
+  question's blocks: no AI is asked and nothing is written. The 🚦 traffic
+  light reads a question for SENSE; this reads it for SHAPE, and the two must
+  not be merged — a lamp that went amber on a missing mark would be a lamp
+  nobody could read at a glance.
+- **IT READS THE SAME HELPERS THE KEY IS BUILT FROM.** `qPartsWithoutExplanation`
+  is the per-part filler's own definition of "a part with no note";
+  `qHasKeywords` is the gate 🔲 Fill-in-the-blanks mode serves on; `qMarksOf`
+  is the number the printed `[2]` comes from. A second reading of any of them
+  would drift, and the report would then name a gap the key does not have —
+  or miss one it does.
+- **"MARKS ON A PART" MEANS ITSELF OR A TEXT BLOCK BELOW IT** (`pfPartsWithoutMarks`).
+  `qPartFind` walks every block filed under the letter — the opener, the texts
+  under it and its (i)/(ii) sub-parts — so a mark anywhere in the part counts.
+  **Only a TEXT block counts**: an answer box is not a question and has no
+  marks of its own. A question with no parts is one part, and any marked text
+  satisfies it.
+- **A CHECK THAT CANNOT BE ACTED ON IS NOT RAISED.** A multiple-choice question
+  with no written-answer box has nowhere for a keyword to go, so "no keywords"
+  is not a finding on it — a row nobody can clear is the row that makes the
+  real ones get clicked past. It is reported as **skipped**, with the reason,
+  so the report still says why.
+- **A QUESTION WITH NOTHING ATTACHED IS NAMED, NEVER DROPPED.** It cannot be
+  checked, and a report that quietly left it out would read as a clean paper.
+- **EVERY ROW LEADS SOMEWHERE.** ✏️ on a row opens that one question in the
+  full editor through `editQuestionFromPapers`, the page's own door, so Save
+  brings the author back to that chip. ✏️ **Fix them all in editing mode**
+  opens every flagged question — and only those — through `emOpenPaper`, the
+  same door the year's own ✏️ Edit all uses.
+- The year button is drawn only when the year has something attached; the
+  report reuses the whole-paper editor's dialog shell (`.pp-pe-*`) so the two
+  read as one family of tools.
+- Run **`node tools/paper-format-tests.mjs`** after touching any of it.
+
+## 🅐 ✍️ One HALF of a past paper — practise or print just the MCQ, or just the OEQ (v1.400.0)
+
+`PP_KINDS` / `ppKindDef` / **`ppKindOf`** / `ppKindFilter` / `ppKindBankQs` /
+`ppKindCounts` / `ppKindTitle` / `ppPaperHitIds` (in `app.js`, search
+`ONE HALF OF A PAPER`), the `kind` argument on **`ppPracticeYear`** and
+**`ppPrintYear`**, the 🅐 / ✍️ tiers inside the *Practise the papers* card and
+their `.pp-pr-kind*` / `.pp-pr-main` / `.pp-pr-kinds` CSS.
+
+A PSLE paper is two different exams stapled together: Booklet A is thirty
+multiple-choice questions answered on a separate sheet, Booklet B is written
+answers on ruled lines. A class revising them wants one or the other — a quick
+run at the multiple choice, or a whole sitting on the open-ended questions,
+where most of the marks and all of the writing are. The only portions on offer
+were **this whole paper** and **every paper**, so a teacher who wanted thirty
+MCQs had to hand out a paper with the written half attached to it.
+
+Each paper now carries a tier per half — **▶ Practice · 👁 Preview · 🖨 Print** —
+and so does **📚 All years**, which is what "practise every PSLE paper's MCQ"
+means.
+
+- **`ppKindOf(bq)` IS THE ONE PLACE A QUESTION'S HALF IS DECIDED**, and it asks
+  `qIsMcqOnly` — THE app's own test — on the ATTACHED BANK QUESTION's own
+  blocks. The tier's count, the practice queue, the preview and the printed
+  sheet all read it, so a tier that says "28 questions" cannot sit over a sheet
+  that prints 30. Two readings drift, and a count that disagrees with its own
+  sheet is only ever found after the printing.
+- **THE PAPER ROW'S BOOKLET IS DELIBERATELY NOT READ.** A past-paper row carries
+  a `bk` ('A' / 'B') and a `type` — and `type` is a SKILL (`PP_SKILL`, where
+  `open` means "open-ended explanation"), not a question shape; `ppCreateForAssign`
+  reads the pair to pick a starting CATEGORY. But what is practised and what is
+  printed is the **bank question**, and the two can disagree: a Booklet A row
+  whose attached question was authored with a writing box is an open-ended
+  question however the paper numbered it. Reading the booklet would file it
+  behind ▶ Practise the multiple choice, where a child is handed a question they
+  cannot answer by picking an option — **and the button would look exactly as
+  though it had worked**. The booklet is the paper's record of how the paper was
+  printed (what the whole-paper editor edits, what the hover card shows), never
+  a fact about the question being served.
+- **NO KIND — OR ONE NOBODY RECOGNISES — MEANS THE WHOLE PORTION, untouched.**
+  That is what every caller predating this already does, and the direction is
+  chosen on purpose: a stray kind can then only ever print MORE than was asked
+  for, never turn a button into one that silently does nothing.
+- **`ppPrintYear('')` NOW MEANS EVERY PAPER.** It filtered `String(q.year) === ''`
+  and so matched nothing, which is why the All-years row had no print button at
+  all. `ppPaperHitIds(year)` is the shared row list and sorts by **year then
+  number**, the order `ppAttachedBankQs` already returns — so a printed sheet and
+  the practice queue built from the same portion run in the same sequence. Within
+  one year the year key compares equal, so a single-year print is byte-for-byte
+  what it always was, title and cover included.
+- **`missing` IS CARRIED THROUGH UNFILTERED.** A row with nothing attached has no
+  blocks, so it belongs to neither half — *"skipped N with no attached question"*
+  is the same true statement about the paper whichever half was asked for, and
+  filtering it to the half would hide a real gap.
+- **A HALF NAMES ITSELF ON THE SHEET AND ON THE COVER** (`ppKindTitle`), and
+  deliberately **never names a booklet**: the half was read off the questions, so
+  putting "Booklet A" on a cover would claim something this never checked.
+- **AN EMPTY HALF REFUSES AND SAYS WHICH HALF.** "No multiple choice question is
+  attached for 2018 yet" — never an empty sheet, and never an empty practice
+  session.
+- **THE TIERS ARE GENERATED FROM `PP_KINDS`**, never written out by hand, so a
+  half added to that table gets its three buttons without being told. A half with
+  **no** questions draws no tier at all — a row of disabled buttons is the row
+  that makes the live ones get scrolled past — and the **breakdown line names
+  every half, zeros included**, so an empty one is stated rather than hidden.
+- **STUDENTS GET ALL OF IT.** The tiers carry no role test: a student already
+  previews and prints a whole past paper from this card, so a half of one is the
+  same exposure and the same button. ✏️ Edit all questions stays `_canAuthor()`.
+- Nothing new is needed downstream: `printFromPreview` and `_wsPreviewSnapshot`
+  both carry `_wsPreviewPaper.items` — the already-filtered list — so 🖨 from
+  inside a half's preview prints that half, and the edit round-trip reopens it.
+- Run **`node tools/paper-halves-tests.mjs`** after touching any of it.
+
+## ⏳ A batch with a RELEASE DATE on it (v1.354.0)
+
+`RELEASE_TZ` / `RELEASE_DAY_RE` / `releaseDayKey` / `releaseToday` /
+`releaseDayFromNow` / `qReleaseOn` / `qScheduled` / **`qReleased`** /
+`qReleaseLabel` / `qReleaseWhen` / `qReleaseChipHtml` (in `app.js`, beside
+`qInSyllabus` — search `Scheduled release`), the pad's own half —
+`RAPID_RELEASE_KEY` / `rapidRelease` / `setRapidRelease` / `_rapidReleaseSetup`
+/ `_rapidReleasePaint` / **`_rapidApplyRelease`** — and the 🗓 page's
+`_bankScheduledRows` / `renderBankScheduled` / `_bankSetRelease` /
+`bankReleaseNow` / `bankReleaseBatchNow` / `bankMoveRelease`, plus
+`#rapidReleaseWrap` and `#bankScheduledContainer` in `index.html`.
+
+⚡ Rapid add gained a **📅 Release date for this batch** picker beside its
+📚 level picker. Everything queued after it lands in Vetting exactly as it
+always did, is approved into the bank exactly as it always was — and **keeps
+the date**: no practice mode, quest, worksheet-driven queue or game serves it
+to a student until that morning.
+
+- **IT IS NOT THE 🗓 SCHEDULED QUESTIONS PAGE, AND THE TWO MUST NOT BE MERGED.**
+  That page keeps a whole COPY of the question OUT of the bank, in its own
+  `scheduledQuestions` collection, and writes it in on release day — so until
+  then the bank does not know the question exists and nothing can be tagged,
+  checked, printed or put on a worksheet in advance. This is the opposite, and
+  it is what was asked for: the question is in the bank from the moment it is
+  approved, wearing a date. Both are listed on the 🗓 page, in their own
+  sections, saying which is which.
+- **SO THERE IS NOTHING TO RUN, AND NOTHING TO DEPLOY.** A release is not an
+  event: no cron, no Cloud Function, no second write, no rules change, nothing
+  to miss while every tab is closed. The question becomes servable because
+  `qScheduled` starts coming out the other way — which is also why a date can be
+  moved or cleared at any time and takes effect on the very next render.
+- **`qReleased(q)` IS THE ONE PREDICATE**, and every student-facing pool asks it
+  beside `qInSyllabus` / `qWithinStudentLevel`. **The CENSUS in
+  `tools/scheduled-release-tests.mjs` fails on the NEXT pool somebody adds
+  without it** — a pool left behind serves a question weeks early, on a screen
+  that looks perfectly right, with nothing anywhere to say it happened.
+- **IT READS NO ROLE, deliberately.** `qWithinStudentLevel` has to ask who is
+  looking; this does not, which removes the whole class of "an admin previewing
+  as a student saw it anyway" holes. What separates the two audiences is
+  **WHICH SURFACES ASK**: the serving pools do, and the management surfaces —
+  the bank list, the bank grid, the vetting list, the worksheet builder, the
+  print picker — deliberately do not, and **badge it** instead. That is exactly
+  the rule an out-of-syllabus question already follows, and it is what lets a
+  teacher build next term's worksheet today.
+  - **A worksheet is the one surface both audiences reach, so it gets a THIRD
+    answer** — see 🔒 …and the same sheet, handed to a STUDENT below. The
+    teacher keeps the question on the sheet and prints it; the student gets a
+    **locked row** saying the day it opens. (Until v1.355.0 the rule here was
+    "an explicit act beats a schedule" and the student was simply served it.)
+- **A VALUE THAT IS NOT A DAY KEY IS NOT A SCHEDULE, and it FAILS OPEN.**
+  `qReleaseOn` returns `''` for anything that is not exactly `YYYY-MM-DD` — a
+  `Date`, an ISO timestamp, a number, a word — so the question behaves precisely
+  as an unscheduled one: served, and wearing no badge. That direction is chosen
+  on purpose. A question served a few days early is an embarrassment a person
+  can SEE; a question withheld from every mode for ever by a value nobody can
+  read is the silent disappearance most of the guards in this file exist to
+  prevent. `_rapidApplyRelease` is the only writer and it writes that shape and
+  nothing else.
+- **A DATE THAT HAS PASSED IS NOT A SCHEDULE EITHER**, which is what makes the
+  field self-clearing: an old date left on a question costs nothing, needs no
+  sweep, and never becomes a stale ⏳ badge pointing at last month.
+- **THE DAY IS SINGAPORE'S** (`releaseDayKey`, `en-CA` + `timeZone`), the same
+  one the old scheduler has always used. Read off the device instead and a paper
+  is out a day early on half the class's phones and a day late on the rest.
+- **THE BATCH IS CAPTURED WHEN THE FILE IS QUEUED**, synchronously, in
+  `rapidAddFiles` — never read inside the job. It rides `opts.release` through
+  `startRapidJob` → `_rapidQueuePdf` → `_rapidExpandPdf` → every page → 
+  `processRapidJob`, on exactly the same footing as the batch level and for
+  exactly the same reason: a forty-page paper takes minutes to render with the
+  pad open the whole time, so an author who queues one paper and moves the
+  picker for the next must not have the first land on the wrong date. It is
+  applied to **every question the page held** — a page of five is five questions
+  held to the same morning, not one.
+- **IT LIVES IN `sessionStorage`**, like the batch level: a batch is one
+  sitting, so the date survives a reload mid-pile and the pad being closed and
+  reopened, and is back to "release immediately" in a new tab or tomorrow. A
+  release date that persisted for a week is the one an author set last Tuesday
+  and never noticed again — and every question added afterwards would sit
+  invisible to the whole school with nothing on any screen to say why. The
+  picker's floor is **tomorrow**, so "today" is never offered: a question
+  released today is a question with no schedule, and offering it as one is how
+  an author believes a batch is being held back when it is already out.
+- **IT SURVIVES AN EDIT FOR FREE, and that is why `releaseOn` is deliberately
+  NOT in `EDITOR_OWNED_QUESTION_FIELDS`.** The editor has no control for it, so
+  `carryOverQuestionMeta` restores it. **Adding an editor field for it later
+  means adding the name to that Set in the same commit**, or an edit would put
+  a cleared date straight back.
+- **A SCHEDULE NOBODY CAN FIND IS A SCHEDULE NOBODY CAN UNDO.** The ⏳ chip
+  (`qReleaseChipHtml`, ONE builder) is on the vetting card, both bank views and
+  the worksheet builder, and the 🗓 page lists every held-back question
+  **grouped by date**, across the bank AND the vetting list — a batch is very
+  often still in vetting when the teacher comes looking, and a page that showed
+  only the approved half would say "nothing is scheduled" about forty questions
+  that are. 🚀 Release all now and *Move to* act on a whole date at once.
+- `_bankSetRelease` is the ONE writer on that page: **QUIET** (moving a date is
+  housekeeping, not a question authored, and must not land in anybody's
+  work-session log) and **rolled back when the write did not land**, because a
+  page that has released a question the database still holds back looks
+  perfectly right until the next sign-in.
+- Run **`node tools/scheduled-release-tests.mjs`** after touching any of it.
+
+### 📅 Schedule release in the question editor (v1.361.0)
+
+- `openEditorRelease` / `saveEditorRelease` and `#editorReleaseOverlay` serve
+  both Create and Edit, beside the bank save action. A valid future day releases
+  at Singapore midnight. Cancel writes nothing; confirmation saves current edits
+  and `releaseOn` together, retaining the question id, provenance and keywords.
+- This supersedes the role-independent serving rule above: **`qReleased` stays
+  a pure date predicate; `qAvailableToViewer` gates all practice pools** using
+  `_canAuthor() || qReleased(q)`. Teacher/employee accounts can practise early.
+  Practise-as-student switches `currentUser.role` to student, so never use the
+  real teacher email or `_realUser` to bypass this restriction. Worksheet locks
+  read the same viewer gate. The student-pool census requires that gate.
+- Schedule release is a separate SAVE COMMAND, not a field collected with the
+  question form: it overwrites `releaseOn` AFTER `carryOverQuestionMeta`, so
+  `releaseOn` deliberately remains outside `EDITOR_OWNED_QUESTION_FIELDS`.
+  Ordinary saves preserve dates, and Scheduled Questions can change/clear them.
+- `saveQuestion(q, {fromVetting:true})` commits the bank write and vetting removal
+  in one Firestore batch. The editor resets only after success; failed writes
+  retain the draft, bank/vetting records and owner mapping. Never publish an
+  undated question first or remove vetting before its bank write succeeds.
+- Run `node tools/editor-release-tests.mjs`, `node tools/scheduled-release-tests.mjs`
+  and `node tools/rapid-pdf-tests.mjs` when changing this flow or the viewer gate.
+
+### 🔒 …and the same sheet, handed to a STUDENT (v1.355.0)
+
+`qLockedFrom` / `qLockSplit` / `qLockSoonest` / `qLockNote` (beside
+`qReleaseChipHtml` — search `THE LOCKED ROW`), `_wsResolve` /
+`_wsSavedQuestions` / `_wsLockedQuestions` / `_wsEmptyMsg`, the gate at the top
+of **`launchWorksheetPractice`**, the 🔒 row in `wseRenderIn`, the count on the
+📄 My Worksheets card, and `.wse-row-locked` in `index.html`.
+
+An admin BUILDS next term's sheet today — that is the whole point of the rule
+above, and none of those surfaces asks `qReleased`. A STUDENT handed that same
+sheet must not be able to read the question before its date. So the sheet
+withholds it from them, and SAYS SO.
+
+- **THE THIRD ANSWER IS THE ONLY HONEST ONE.** Serving it early defeats the
+  schedule; dropping it silently leaves a NUMBERED sheet with a hole in it,
+  which reads as a printing fault and sends a child hunting for a question
+  nobody can find. A **LOCKED ROW** is neither: the worksheet still holds the
+  question and the student is told the day it opens. That replaces the older
+  wording — *"an explicit act beats a schedule"* — which settled for the second.
+- **`qLockedFrom(q)` READS THE ROLE, which every other release helper
+  deliberately does not.** Those are asked by pools whose whole audience is
+  students; this one is asked by surfaces BOTH audiences reach. ONE predicate,
+  so the row, the count, the toast and the practice queue can never disagree
+  about which questions are locked — two tests drift into a sheet that prints a
+  question its own card says is not open yet.
+- **`_wsResolve` is the ONE resolver and it SPLITS rather than filters.**
+  `_wsSavedQuestions` is its `ready` half (the preview, the print and the
+  practice queue), `_wsLockedQuestions` its `locked` half (every surface that
+  has to explain the gap). An author's split is always the whole sheet.
+- **`launchWorksheetPractice` is the gate for every OTHER worksheet-driven
+  queue** — the builder's own selection, a past paper, Ai-nstein's set — because
+  it is the ONE door they all come through, so a caller added next month is
+  gated without being told. `practiceSavedWorksheet` therefore hands it the
+  WHOLE sheet, locked questions included: passing only the ready half means the
+  lock is never reported at all. The mode is deliberately **not** switched on a
+  refused launch.
+- **A wholly-locked sheet must not say "no longer in the bank"** (`_wsEmptyMsg`).
+  That sentence is flatly untrue, and it is the one that sends somebody off to
+  rebuild a sheet which is perfectly fine and simply early.
+- **The locked row is not an ERROR row.** `.wse-row-locked` is indigo where
+  `.wse-row-missing` is orange: one says something is broken, the other says
+  come back on the day.
+- **The SOONEST date is the one named** (`qLockSoonest`) — naming the last of
+  them sends a student away for a month when half the sheet opens on Monday.
+- Run **`node tools/scheduled-release-tests.mjs`** after touching any of it.
+
+## 🚦 The auto-check — a question checks itself before it reaches Vetting (v1.356.0)
+
+`AUTOCHK_TRIES` / `AUTOCHK_KEEP_FINDINGS` / `autoChkOn` / `autoChkRead` /
+`autoChkState` / `autoChkBetter` / **`autoChkRun`** / `_autoChkRepairPrompt` /
+`_autoChkApply` / `autoChkStamp` / `autoChkCardHtml` / `autoChkTally` /
+`autoChkBatchNote` (in `app.js`, search `THE AUTO-CHECK`), the step **2c** in
+`processRapidJob`, `_tlFromStamp` inside `tlStateOf`, and the
+`#rapidAutoChkWrap` switch on the ⚡ Rapid add pad.
+
+⚡ Rapid add read a page, cropped its figures, wrote the answers, lettered the
+parts and filed the lot in Vetting — and whether any of it was RIGHT was
+somebody's job to find out afterwards, one card at a time. A paper of forty
+questions was forty questions to read.
+
+`autoChkRun` closes that loop. Every question built by the pad is checked, and
+one that comes back 🟡 or 🔴 is handed the checker's own findings and asked to
+fix itself, up to `AUTOCHK_TRIES` (3) times. Green ones reach Vetting clean;
+anything still amber or red reaches Vetting **wearing its lamp and its
+findings**, so the author's attention goes to the handful that need it.
+
+- **IT IS THE SAME CHECKER, NOT A SECOND ONE.** `_cqLocalFindings` and
+  `_cqAiCheck` are ✅ Check Questions' own two layers and `tlVerdict` is 🚦 the
+  traffic light's own plain-code colour, so the lamp on the card and the queue
+  can never disagree about the same question. `autoChkRead` is deliberately a
+  copy of `tlRun`'s BODY rather than a call to it — `tlRun` writes into
+  `_tlCache` and repaints every lamp on the page, and a question that has not
+  been saved yet has no card to repaint and no business in that cache until it
+  does. The repair is allowed a prompt of its own (it is a different job); the
+  CHECK may never be, and the harness fails on an `askGemini` inside
+  `autoChkRead`.
+- **THE CHECK SEES THE PICTURES, and that is why it runs at step 2c rather than
+  earlier.** `_cqAiCheck` → `_cqMedia` reads the image blocks' own URLs, and by
+  that point the cropped — and, where a rectangle failed, the whole-page —
+  figures are uploaded and attached. So the question is read as a WHOLE,
+  exactly as a student will meet it, options against diagram. Check it before
+  the crop and *every* question reads as one whose wording refers to a figure
+  that is not there.
+- **A FAILED CHECK IS ITS OWN STATE AND IS NEVER GREEN.** "The check could not
+  run" and "the check found nothing" are opposite things, and the AI being off
+  on the device is one of the two. An `error` also **stops the loop**: a repair
+  is another AI call down the same road, so retrying it three times is three
+  more failures and three more delays for a question that reaches Vetting
+  either way.
+- **NOTHING IS EVER WITHHELD.** The question reaches Vetting whatever the lamp
+  says — green ones simply arrive clean. A question quietly held back because a
+  model disliked it is one its author never finds out about, which is far worse
+  than an amber card, and it is the opposite of what this pad is for.
+- **A REPAIR THAT CAME BACK WORSE IS THROWN AWAY.** `autoChkRun` keeps the
+  blocks that earned the BEST verdict it saw and finishes on those, so a red
+  repaired to amber and then back to red files the amber question. `autoChkBetter`
+  compares READS rather than bare states, because at the same colour the one
+  with **fewer findings** is the better question and colour alone cannot see
+  that.
+- **THE PICTURES ARE RE-ATTACHED POSITIONALLY** (`_autoChkApply`), never
+  re-fetched and never re-cropped: the model returns an EMPTY `image`
+  placeholder, so without this every repair strips the question's figures and
+  leaves a card wearing *Diagram missing* — indistinguishable from a page whose
+  rectangles failed, and the single worst thing this loop could do. A reply with
+  FEWER image blocks gets the leftovers appended (a figure in the wrong place is
+  one drag from right; no figure cannot be answered), one with MORE has the
+  extras dropped (an empty picture block prints as a blank space), and
+  `_imgEnhanceState` travels with the picture because it is keyed by BLOCK id
+  and the repair mints new ones.
+- **AN EMPTY REPLY IS REFUSED.** A truncated or refused repair would otherwise
+  replace a whole question with nothing — destroying work the checker only
+  wanted tidied.
+- **THE BATCH LEVEL IS RE-APPLIED AFTER EVERY REPAIR.** A repair may move the
+  topic, and in this app the level is READ OFF the topic — so a re-file
+  silently undoes the level the author set for the whole pile. The release date
+  needs nothing: `_autoChkApply` replaces blocks and meta only, so `releaseOn`
+  survives on its own.
+- **THE VERDICT IS RECORDED TWICE, and both are wanted.** `q.autoCheck` is
+  durable (saved with the question, and deliberately absent from
+  `EDITOR_OWNED_QUESTION_FIELDS` so `carryOverQuestionMeta` keeps it across an
+  edit); seeding `_tlCache` lights the lamp the vetting card ALREADY draws,
+  with the findings the 🚦 panel already renders. Inventing a second lamp would
+  be a second lamp to keep in step with the first.
+  - **`_tlFromStamp` is what makes it survive the tab.** `_tlCache` is a
+    session's memory, so without it a card opened the next morning wears a 🔴
+    badge over a grey lamp with nothing behind it — a verdict the author is
+    told about and cannot read. `tlStateOf` adopts the stamp only when there is
+    no live record (a check somebody pressed is later, and outranks a
+    remembered one) and only while `autoCheck.sig` still matches, so an edit
+    since reports **stale** exactly as it does anywhere else.
+  - `AUTOCHK_KEEP_FINDINGS` caps what travels: an attempt is a document and a
+    document dies at 1 MB. `found` is the honest count and is what the badge
+    reports, so a capped list never understates what was wrong.
+- **A MERGED QUESTION LOSES ITS VERDICT** (`qMergeQuestions` deletes
+  `autoCheck`). The two halves were each checked ALONE — the first missing its
+  last parts, the second with no stem — so neither describes what now exists,
+  and a green badge on it would say it had been read when nothing has.
+- **The switch is a preference, so it is in `localStorage`** — unlike the batch
+  level and the batch release date, which are one sitting each and live in
+  `sessionStorage`. It defaults ON, and the pad says what it costs: one extra
+  AI call per question, and up to three more on a question that needs fixing.
+- **A costly, invisible thing is a thing nobody trusts**, so the toast and the
+  paper's own summary carry `autoChkBatchNote` — `2 🟢 1 🔴` — and each card
+  carries its badge. An author who cannot tell a checked question from an
+  unchecked one reads every card anyway, which is the work this removes.
+- Run **`node tools/auto-check-tests.mjs`** after touching any of it.
+
+### [2] — the marks come off the paper (v1.356.0)
+
+`AI_MARKS_MAX_LIFT` / `_aiMarksSane` / **`_aiLiftMarks`** (beside
+`_partsPromptRules`), the `MARKS` clause in `_partsPromptRules()`, the `marks`
+field in all four build prompts' block shape, and the text branch of
+`buildBlocksFromAi`.
+
+`block.marks` has existed since v1.314.0 with a picker in the editor and a
+printed `[2]` on the sheet, and **no AI path ever wrote one** — so every
+question imported off a paper arrived worth nothing, and the number the paper
+plainly printed had to be typed back in by hand, question by question.
+
+- **`buildBlocksFromAi` is where the lift happens**, because it is the ONE
+  function every AI authoring path goes through: 🤖 Build from screenshot,
+  ⚡ Rapid add, the bulk PDF import, 🔄 Regenerate copy and 📄 the exam paper
+  builder gained it at once rather than one at a time.
+- **A NUMBER THE MODEL DID NOT GIVE IS STILL READ OFF THE WORDING.** The prompt
+  asks for `marks`, and a model transcribing a page writes `[2]` into the text
+  at least as often as it fills the field in. Lifting it is not a guess: the
+  paper printed it, at the end of the question, in the convention this app
+  already prints it back in.
+- **THE FIELD IS THE ONE PLACE THE NUMBER LIVES**, so a marker still sitting in
+  the wording is the same number twice. `qPartBodyHtml` already strips a
+  trailing marker when the field is set and this strips it at the other end —
+  the same both-ends rule the doubled part marker follows, and the reason an
+  author opening the question sees clean wording rather than a bracket the
+  renderer is quietly hiding.
+- **…BUT ONLY A PLAUSIBLE ONE.** `AI_MARKS_MAX_LIFT` (20) is far below
+  `QMARKS_MAX` (99): a bracketed number bigger than that at the end of a
+  question is a citation, a year or a figure reference, not what one part of one
+  question is worth. Refusing it costs a marks field an author can fill in;
+  accepting it prints `[1998]` on a worksheet.
+- **IT FAILS OPEN.** Nothing lifted means the block is byte-for-byte what it
+  always was — wording untouched, no `marks` field, and the bracket still
+  printed exactly where the paper had it. A bracket in the MIDDLE of a question
+  is prose and is never touched.
+- **A regenerated copy keeps the marks** — `_serializeQuestionForRegen` tags
+  each text line with them, or a variation of a 2-mark question comes back worth
+  nothing and the teacher types the number in again.
+- Run **`node tools/auto-check-tests.mjs`** after touching any of it.
+
+## 🗂️ Custom Paper — a whole mock paper, built from screenshots (v1.363.0)
+
+`cpb*` / `CPB_*` in `app.js` (search `CUSTOM PAPER — a whole mock paper`), the
+`.cpb-*` CSS and `#page-custompaper` in `index.html`, plus `readQuestionRun`,
+`qIsMcqOnly`, `qHeldBack` and the anchored front sheet — the four pieces it
+shares with the rest of the app rather than forking.
+
+Paste the questions in — a page of last year's prelim, a figure out of a
+textbook, one you wrote yourself — and get back a paper laid out the way the
+children sit one: **Booklet A** of multiple choice and **Booklet B** of
+open-ended, each with its own cover, numbered straight through, with an answer
+sheet and an answer key. Admin only.
+
+- **IT IS NOT THE 📄 EXAM PAPER BUILDER, and the two must not be merged.** That
+  page imports a paper that ALREADY EXISTS, with its own marking scheme, and
+  what comes out is bank questions — there is no paper at the end of it,
+  because the paper was the input. This one has no marking scheme to read (the
+  questions are being gathered from everywhere) and the PAPER is the output.
+  Nor is it ⚡ Rapid add, which fires each screenshot off as its own job and so
+  structurally cannot join the three screenshots that are one question.
+- **`readQuestionRun` IS THE ONE READER**, and the extraction is the point: the
+  batching, the `continuation` stitch across a batch boundary and the
+  `_epCropInto` crop are now called by both pages, so a question spread over
+  three screenshots is joined here for exactly the reason it is joined there.
+  Forked, the drift reads as *"the other page joins my screenshots and this one
+  does not"*. It is transport — it is HANDED a prompt — which is why it is
+  exempt by name in the grounding census and named in `AUTHORING_FUNCTIONS`.
+- **`qIsMcqOnly(blocks)` DECIDES THE BOOKLET, and it is the ONE test** the print
+  packer and the printed MCQ's answer bracket already read. It is a fact about
+  the BLOCKS, never the model's own `questionType`: the booklet decides whether
+  a child is given ruled lines to write on, and a question in the wrong one is
+  answerable in the wrong place — found in the exam hall. **"and nothing else"
+  is the load-bearing half**: an MCQ that ALSO carries a writing box is
+  open-ended, which is the safe direction, because its worst case is ruled lines
+  nobody uses. `cpbSetBook` is the teacher's override on top, because the reader
+  is very good and not perfect.
+- **THE TWO BOOKLETS ARE NUMBERED AS ONE RUN** (`cpbBooklets`) — A is 1…n and B
+  carries straight on — so the numbers are worked out over BOTH lists at once
+  and never from a question's position in its own. `cpbMove` reorders WITHIN a
+  booklet for the same reason: nudging a Booklet B question up past the whole of
+  Booklet A would renumber the entire paper.
+- **NOTHING IS WRITTEN UNTIL SEND, and what is written is HELD BACK.** See
+  🔒 below. `_cpbCommit` awaits each `saveQuestion` one at a time and only pushes
+  into `questionBank` once the document really went — a bank holding a question
+  Firestore does not looks perfectly right until the next sign-in.
+- **THE PAPER GOES THROUGH `buildWorksheetHtml` AND `autoscaleAndPrint`**, the
+  one builder and the one planner every other print in this app uses. A renderer
+  of its own would drift, and it would drift in the direction nobody checks —
+  the sheet a class is sitting. The `paper` option is what it adds:
+  - `numbers` puts the paper's own number in the LEFT GUTTER beside the first
+    line (`.print-q-paper` / `.print-q-paper-num`, the shape `.print-has-part`
+    already uses) instead of a "Question N" heading. **Nesting the two is what
+    gives a paper its two columns** — the number in the first, (a)/(b)/(c) in
+    the second — for free.
+  - `pageHtmlById` emits a whole SHEET before a question, for the cover that
+    opens Booklet B.
+  - `noBracketIds` drops the MCQ answer bracket, because Booklet A is answered
+    on the answer sheet and a bracket nobody writes in is a mark a child looks
+    for and cannot find. The KEY is pushed either way — an answer is never
+    optional.
+  - `tailHtml` is the answer sheet, appended after the last question and before
+    the key.
+  **With no `paper` option every other print in this app is byte-for-byte what
+  it was**, and the harness pins exactly that.
+- **THE COVER LAYOUT IS COPIED EXACTLY; WHOSE PAPER IT IS IS NOT.** The ruled
+  identity box, the index-number grid, the instructions box and the booklet
+  structure are what make a mock paper feel like the real thing to sit, and they
+  are reproduced. Every line of the heading is a FIELD the teacher fills in, and
+  **nothing is prefilled with the name of a real examination board** — a tuition
+  centre's mock paper that passes for an official one is not something to hand a
+  class. `_cpbCoverFootHtml` deliberately prints no "this booklet consists of N
+  printed pages": the count is only known after the planner has paginated, and a
+  cover stating the wrong one is worse than one stating none.
+- **The mark totals are COMPUTED** (`cpbMarks`) — Booklet A at `CPB_MCQ_MARKS`
+  a question, Booklet B from each question's own printed `[n]`. A B question the
+  reader found no marks on counts as `CPB_OPEN_DEFAULT_MARKS` rather than as
+  nothing, and **the page says how many did**: a cover that silently understates
+  the paper is worse than one that admits what it assumed.
+- **…and they are measured against the shape the paper is being built to**
+  (`CPB_TARGET_MCQ` = 30 questions, `CPB_TARGET_OPEN_MARKS` = 40 marks — the
+  current syllabus, 60 + 40 = 100; it was 28 and 44 before it changed, which is
+  why the numbers are stated once here rather than read off a past paper).
+  - **IT IS A TARGET, NEVER A TOTAL.** Nothing printed on a cover comes from it:
+    the covers state what the paper ACTUALLY adds up to, always, because a cover
+    claiming 60 marks over 25 questions is a lie a class discovers in the exam
+    hall. What the target does is say how far off the paper is while it is still
+    being built, which is the whole reason assembling one is slow.
+  - **Both targets are editable per paper, and `0` means NO target.** A short
+    topical paper is a real thing to build, and a page nagging that it is 22
+    questions short of a PSLE paper is a page whose warnings stop being read.
+    `_cpbTargetNum` is the ONE reader: junk falls back to the syllabus shape, a
+    real 0 is kept, and an absurd number is capped rather than believed.
+  - **`cpbGapLabel(need, unit)` MUST name its unit.** Booklet A is measured in
+    QUESTIONS and Booklet B in MARKS, and the two chips sit side by side — a
+    bare "26 to go" on each is two different quantities wearing the same words.
+  - Over the target is its own state, in its own colour, and never reads as
+    done: a 33-question Booklet A is as wrong as a 24-question one.
+  - The target inputs fire on `change` (blur/Enter), not `input` — typing "30"
+    over "3" would otherwise re-render at "3" and take the caret with it.
+- **The draft is mirrored to IndexedDB**, keyed by TAB like the exam paper's and
+  through the SAME `_epdTx` helper — the fiddly, already-proven half is shared
+  and only the keys differ. Forty screenshots is an afternoon, and nothing is
+  written until Send.
+- The page is **admin-only in two places**: the nav item carries `admin-only`,
+  `custompaper` is deliberately not on `EMPLOYEE_PAGES`, and `navigateTo`
+  rewrites it — hiding a nav item is never on its own what keeps a page shut.
+  `cpbRender` gates on `_canAuthor()`, which is the line that would need nothing
+  changing if that were ever revisited.
+- Run **`node tools/custom-paper-tests.mjs`** after touching any of it.
+
+### 🅰 TWO MODES — an exam paper, or an ordinary worksheet (v1.368.0)
+
+`CPB_MODES` / **`cpbMode`** / `cpbIsWorksheet` / `cpbModeDef` / `cpbThing` /
+`cpbSetMode`, **`cpbLayout`** (with `cpbBooklets` as its paper-mode name),
+`cpbDefaultMarks`, `CPB_TARGET_QUESTIONS`, `_cpbWsLeadHtml` /
+**`_cpbWorksheetOpts`** / **`_cpbOutputOpts`**, `_cpbWorksheetSetupHtml` /
+`_cpbLevelFieldHtml` / `_cpbEnhanceSwitchHtml`, `_cpbWorksheetListHtml`, the
+`mode` / `targetQuestions` / `wsIntro` / `wsFields` fields on
+`CPB_META_DEFAULTS`, and the `.cpb-mode*` CSS.
+
+The same pile of screenshots is two different things depending on what the
+teacher is making, and **the difference is the FORMAT and nothing else**:
+📄 **paper** is Booklet A, Booklet B, a cover for each and an answer sheet;
+📝 **worksheet** is one numbered list on an ordinary worksheet — this app's own
+header, the Name / Class / Date strip, and every answer written on the sheet.
+
+- **EVERYTHING ELSE IS IDENTICAL, deliberately.** The same screenshot pad, the
+  same shared `readQuestionRun`, the same ✏️ editor round-trip, the same 📁
+  shelf, the same 👁 preview — and **the same 🔒 HOLD BACK**, for the same
+  reason: the teacher has to be able to print, edit and check the sheet, and no
+  child may meet a question off it before they have sat it. `_cpbCommit` has
+  **no mode branch at all**, and the harness pins that: one branch there is a
+  mode whose questions quietly reach students.
+- **`cpbMode()` IS THE ONE PLACE THE MODE IS DECIDED, and it FAILS TO
+  `'paper'`.** Every paper saved before this existed carries no `mode` field
+  and is a paper; a stray value is a paper too, because that is the mode with
+  the covers ON — the worst it can do is print two sheets nobody wanted, where
+  failing the other way silently strips the covers, the booklet split and the
+  answer sheet off a mock exam somebody is about to sit.
+- **`cpbLayout()` IS THE ONE PLACE THE PRINTED ORDER AND THE PRINTED NUMBERS
+  ARE DECIDED**, in both modes, because the number on the sheet, the number on
+  the answer key and the number in the ③ list all have to be the SAME number.
+  A paper is two booklets numbered as one run; **a worksheet is the single list
+  the teacher arranged, numbered 1…n and never re-ordered** — hoisting its MCQs
+  to the front would throw away the order that was the whole point of
+  arranging it. `cpbBooklets()` is kept as its paper-mode name so no existing
+  caller moved, and in worksheet mode `a` is empty and `b` is everything, which
+  is what lets the totals read the same fields either way.
+- **A WORKSHEET PASSES NO `paper` OPTION AT ALL**, and that is what makes it
+  the app's ORDINARY worksheet: `buildWorksheetHtml` then goes down
+  byte-for-byte the path every other worksheet print takes — a "Question N"
+  heading, an answer bracket under every MCQ, the worksheet header, no cover,
+  no mid-document sheet and no answer sheet. **There is no rendering here that
+  is this mode's own**, which is also what stops it becoming a second renderer
+  to keep in step with the first.
+- **`_cpbOutputOpts()` is the ONE door** the printer, the preview and 🖨 from
+  inside the preview all go through. Asked separately, the preview and the PDF
+  would drift — and a preview of a different sheet is the one thing a preview
+  must never be.
+- **SWITCHING COSTS NOTHING, which is why it is one tap with no confirm.** The
+  questions, their order, every ⇄ booklet moved by hand and every field typed
+  on either side all stay: the worksheet's fields sit on the SAME meta object
+  as the paper's rather than in a nested one, so switching and switching back
+  loses nothing a teacher has typed.
+- **A WORKSHEET HAS NO STANDARD LENGTH**, so `CPB_TARGET_QUESTIONS` is **0** —
+  which in this file means *do not measure me*. A teacher who wants twenty
+  questions types 20 and gets the same gap chip the paper's two targets give;
+  one who does not is never nagged for building a short sheet.
+- **`cpbDefaultMarks(q)` decides what an unmarked question is worth by its
+  KIND.** The two numbers being equal today is not a reason for one caller to
+  assume the other. A question printing nothing still counts as its default and
+  is REPORTED as assumed — a total that silently understates the sheet is worse
+  than one that says what it had to guess.
+- **A worksheet row has no ⇄ button.** A button that moves a question into a
+  booklet nothing is printing is a button that appears to do nothing.
+- The 📁 shelf stores `mode` at the TOP level as well as inside `meta`, so a row
+  can be badged without reading the whole document back; a row written before
+  this existed carries none and is a paper.
+- Run **`node tools/custom-paper-tests.mjs`** after touching any of it.
+
+### 🔒 Held back — in the bank, and not for students yet (v1.363.0)
+
+`qHeldBack` folded into **`qReleased`**, the chip in `qReleaseChipHtml`, and
+`_bankHeldRows` / `_bankHeldSectionHtml` / `_bankSetHold` / `bankUnholdNow` /
+`bankUnholdPaper` on the 🗓 Scheduled Questions page.
+
+A release DATE answers *"not until Monday"*. It cannot answer *"not until I say
+so"*, which is what a teacher building next term's mock paper actually wants:
+the questions have to be in the bank NOW so the paper can be printed, edited,
+checked and put on a worksheet, and no child may meet one until it has been sat.
+
+- **IT IS FOLDED INTO `qReleased` RATHER THAN BOLTED BESIDE IT**, and that is the
+  whole safety story: every student-facing pool already asks that ONE predicate,
+  so all of them gained the gate without being told, and the CENSUS in
+  `tools/scheduled-release-tests.mjs` still guards the next pool somebody
+  writes. A gate of its own is one that pool forgets to ask.
+- **IT IS STRICTLY `=== true`**, and unlike `qReleaseOn` that is NOT a fail-open
+  rule but an exact one: the field has exactly two writers (📝 Custom Paper's
+  send, and the 🔓 release button), neither of which can produce a
+  truthy-but-not-true value, so there is no third state to be lenient about.
+- **`holdBack` is deliberately OUTSIDE `EDITOR_OWNED_QUESTION_FIELDS`**, exactly
+  as `releaseOn` is, so `carryOverQuestionMeta` keeps a question held back across
+  an edit. **Giving the editor a control for it later means adding the name to
+  that Set in the same commit**, or an ordinary edit would release the paper.
+- **A question nobody can find is one nobody can release**, so it wears the
+  🔒 badge on every management surface through the same `qReleaseChipHtml` door
+  the ⏳ chip uses (held back beats a date — saying "releases 3 Nov" about a
+  question that will not is worse than saying nothing), and the 🗓 page lists
+  them **grouped by paper** (`q.source`) with one 🚀 Release all now. Forty
+  separate buttons is a list nobody works through.
+- `_bankSetHold` is the ONE writer: a QUIET write (releasing a paper is
+  housekeeping, not a question authored, and must not land in a work-session
+  log) that is rolled back when the document did not go.
+- The teacher still sees everything, because `qAvailableToViewer` is
+  `_canAuthor() || qReleased(q)` — and a student handed a worksheet carrying one
+  gets the 🔒 LOCKED ROW, since `qLockedFrom` reads the same gate.
+
+### 📑 A front sheet that is not at the front (v1.363.0)
+
+`_printFrontAnchor` / `_printFrontRestarts` / **`_printFrontPlacement`**, read by
+`doScaleAndPrint`, `_printFlowFallback`, `_wsPreviewPack` and
+`_printApplyPageNumbers`.
+
+Every `.print-front-page` there has ever been leads the document — it is lifted
+out before pagination and put back at the top, which is exactly right for a
+cover. **A paper in two booklets needs one that is not**: Booklet B's cover
+belongs where Booklet B starts, and hoisted it becomes a second cover on top of
+the first, which reads as a printing fault.
+
+- A front sheet may name the question it goes immediately before —
+  `data-front-before="<qid>"` — and `data-front-restart` on the same sheet
+  restarts the page numbering behind it, because each booklet is numbered from 1.
+- **No existing front page carries the attribute**, so every sheet this app
+  printed before still prints byte-for-byte the same.
+- **An anchor naming a question that is not on the sheet leads the document**
+  rather than being dropped: visible and wrong-looking beats silently gone,
+  which is the failure nobody would ever notice. (In practice it cannot fire —
+  the builder only emits Booklet B's cover when Booklet B has a question.)
+- **The anchor is the chunk that STARTS the page**, which for a booklet is its
+  instruction line (`__lo__<qid>`, forced onto a new page) and not the question:
+  anchored to the question, the cover would land between the instruction line
+  and question 1 if the packer ever split the two.
+- **The live preview places them the same way**, and its forced breaks are
+  unioned with the teacher's own manual ones — a preview that paginates
+  differently from the PDF is the one thing a preview must never do.
+
+### ✏️ Edit one question of the paper, and come straight back (v1.365.0)
+
+`_editorLoadQuestion` (split out of `editQuestion`), `_cpbEdit` /
+`_cpbEditActive` / `_cpbEditFocus` (up top with the other return state),
+`cpbEditQuestion` / `_cpbCarryOver` / `cpbEditSave` / `_cpbFocusScroll`, the
+`custompaper` branch of `_syncBackToPapersBtn`, and `#cpbEditActions` in
+`index.html`.
+
+**A Custom Paper question IS a bank question in every respect but one: it has
+not been saved anywhere.** It is built by `buildQuestionFromAi` →
+`buildBlocksFromAi` → `qApplyAiParts`, exactly as ⚡ Rapid add's questions are,
+so its blocks, parts, marks, topic and answers are the shape the block editor
+already knows — which is what makes opening it there possible at all, rather
+than this page needing an editor of its own.
+
+- **`_editorLoadQuestion(q)` TAKES THE OBJECT, never an id**, and never reads
+  `questionBank`. That is the whole reason it is split out: `editQuestion` looks
+  a question up in the bank or the vetting list, and a paper question is in
+  NEITHER — so it would find nothing and silently do nothing at all.
+- **EVERY SAVE HERE MEANS ONE THING: back onto the paper.** The page's contract
+  is that nothing reaches the bank until Send, so a save that filed one question
+  early would leave the paper and the bank each holding half the truth, with
+  nothing on any screen reporting it. `#cpbEditActions` REPLACES the ordinary
+  edit row rather than sitting beside it, and `saveEditedQuestion`,
+  `saveEditToBank` and `moveEditToVetting` each route back to `cpbEditSave` as
+  well — a hidden button is never the lock. 📅 Schedule release refuses
+  outright: there is nothing in the bank to date, and this page holds the whole
+  paper back rather than dating one question out of it.
+- **`_cpbCarryOver` reads the SAME `EDITOR_OWNED_QUESTION_FIELDS` allowlist**
+  `carryOverQuestionMeta` reads. A second list would be a second list to forget
+  a field from, and the symptom is the teacher's own ⇄ booklet override
+  (`_cpbBook`) silently thrown away by opening the question and pressing Save.
+- **THE POSITION IS THE POINT.** `_editReturnPage = 'custompaper'` brings the
+  trip back to the page and `_cpbEditFocus` scrolls the row back under the
+  teacher and flashes it, so a paper is worked through top to bottom rather than
+  found again after every fix. It is **spent on use**, or a later render drags
+  the page about.
+- **`_cpbEdit` is declared UP TOP with the other return state**, for the reason
+  `_wsQeReturn` is: `setEditMode` clears it and is reached during module
+  evaluation, so declared down beside the page it would be in its temporal dead
+  zone there and take the whole app down on load.
+- **`setEditMode(false)` is where it is cleared** — the one function every route
+  out of the editor goes through (Save, Cancel, or a fresh create started from
+  the sidebar). `editQuestion` clears it too, or a bank edit saved after a paper
+  edit would be written into a paper instead of into the bank.
+- A question that has LEFT the paper while the editor was open (cleared, sent,
+  re-read) is **said**, not silently appended back on.
+
+### 🖼 The figures are redrawn, because the figures ARE the paper (v1.365.0)
+
+`CPB_ENHANCE_MAX`, the `enhance` switch in `CPB_META_DEFAULTS`, `o.enhance` on
+`readQuestionRun`, the `budget` argument to `_epCropInto`, and `opts.onEnhance`
+on `_fillBlocksFromAiBoxes`.
+
+A figure cropped off a screenshot is a photograph of print — grey, and often a
+photograph of a photocopy. `_fillBlocksFromAiBoxes` can re-render it as clean
+black-and-white line work (`_BW_ENHANCE_PROMPT`, then `_paperCleanDataUrl`),
+and `_epCropInto` passed a flat **`maxEnhance: 0`**, so 🗂️ Custom Paper's
+figures were cropped and never cleaned.
+
+- **IT IS THE CALLER'S DECISION AND THE DEFAULT IS OFF.** An imported paper of
+  forty questions is dozens of slow image-model calls, which is why the exam
+  paper builder and the bulk import pass none and keep the sharp raw crops.
+  Custom Paper passes a budget, because there the figures are the paper.
+- **ONE BUDGET FOR THE WHOLE RUN.** `maxEnhance` inside
+  `_fillBlocksFromAiBoxes` is per CALL, and `_epCropInto` is called once per
+  screenshot group of every question — so a per-call cap is no cap at all on a
+  forty-question paper. `readQuestionRun` makes ONE `{ left }` object and every
+  crop shares it.
+- **`opts.onEnhance` is why the budget can be held across calls.** The return
+  value counts crops that LANDED, not re-renders that RAN, and a caller
+  decrementing by that spends its budget on pictures it never enhanced.
+- **`CPB_ENHANCE_MAX` is a runaway guard, not a budget to spend.** A real paper
+  has thirty-odd figures; anything past it is a pile of screenshots that was
+  never a paper.
+- **Cropping tight is NOT part of the switch and never was.** `_aiRefineCrop`
+  runs on every crop, on every path: it keeps everything belonging to the figure
+  (labels, pointer lines, axis titles, units, "Diagram 1") and cuts the question
+  sentences that came with it, and it is told never to cut through one of the
+  figure's own words. The switch's label says so, or a teacher turning it off to
+  save time would think they were turning the cropping off too.
+
+### 📁 Saved papers — a paper is a thing you come back to (v1.365.0)
+
+`CPB_LIB_MAX` / `CPB_LIB_MAX_BYTES` / `_cpbLib` / `_cpbLibId` / `cpbLibLoad` /
+**`cpbSavePaper`** / `_cpbLibOpenNow` / `cpbLibOpen` / `_cpbLibMarkSent` /
+`cpbLibDelete` / `cpbNewPaper` / `_cpbLibHtml`, filed under
+`users/{adminUid}/customPapers/{id}`.
+
+The per-tab IndexedDB draft (`_cpbDraft*`) is a **CRASH NET**: keyed by tab, it
+holds the screenshots, and it exists so a reload does not lose an afternoon. It
+is not a library — one window holds one paper, and last term's prelim is gone
+the moment this one starts. A saved paper is the other thing entirely: NAMED,
+listed, and reopened whenever.
+
+- **WHAT IS SAVED IS THE PAPER, NOT THE SCREENSHOTS**, and the card says so.
+  Once the questions are read out of them the screenshots are worth nothing to
+  a paper being edited, and they are megabytes apiece against a Firestore
+  document that **dies at 1 MB**. The pictures inside the questions are Storage
+  URLs and travel for free. A payload over `CPB_LIB_MAX_BYTES` is refused
+  **before** the write, naming the size, rather than failing inside Firestore
+  with an error nobody can act on.
+- **An opened paper is NOT dirty.** `_cpbDirty` means "the screenshots changed
+  since they were read"; set true on open it would nag to re-read a paper whose
+  screenshots do not exist any more, and 🔁 Read again would wipe the questions.
+- **Opening REPLACES the page, so it asks first** — and says outright when what
+  is on the page has never been saved. ✚ New paper **lets go** of the saved
+  paper rather than deleting it, so the next 💾 Save makes a new entry instead of
+  writing over last term's.
+- **A SAVED paper is not cleared by a send.** It is on the shelf, so clearing
+  the page would take away the very thing the shelf was for — the paper to
+  reprint and carry on editing — and put nothing in its place. It is stamped
+  `sentAt` instead, best effort: the questions really are in the bank whatever
+  that write does, so a toast saying the send failed would be untrue. An UNSAVED
+  paper still clears exactly as before, and the send confirm says so.
+- **Deleting a saved paper does not touch the questions**, which are in the bank
+  held back; the confirm says that in as many words.
+- `cpbLibLoad` marks itself loaded BEFORE the read, so a refused or failed one
+  does not have every render trying again behind a teacher who is working, and a
+  denied write is NAMED — it is a one-line rules fix on `customPapers`.
+
+#### 🖨 …and EXPORTING a paper keeps it (v1.370.0)
+
+**`_cpbWritePaper({ auto })`** / `_cpbSaveFailNote` / **`_cpbKeepOnExport`**, and
+the one unawaited call at the top of `cpbPrint`.
+
+**The export was the one moment on this page that persisted NOTHING.**
+`cpbPrint` built HTML and printed it; the only copy of the paper was the per-tab
+draft, which is IndexedDB on THAT machine keyed to THAT tab. So a teacher who
+exported a paper at home and closed the browser had no copy on any server and
+nothing the computer in front of them could reach — the questions were not in
+the bank either, because nothing is written until Send. That is a real
+afternoon's work, and it happened. The export now writes the paper onto the 📁
+shelf, which is Firestore and therefore every device.
+
+- **THE EXPORT MUST NEVER FAIL, WAIT ON, OR BE CHANGED BY THE KEEP.** It is
+  started at the TOP of `cpbPrint` — before the image preload and the layout —
+  and deliberately **not awaited**, so a refused write, a full shelf or a dead
+  connection costs the teacher nothing they asked for, and a print they cancel
+  still keeps the paper.
+- **ONE WRITER, TWO DOORS.** The 💾 button and the keep both go through
+  `_cpbWritePaper`, which REPORTS rather than toasts because the two want
+  different wording for the same refusal (`_cpbSaveFailNote` is that wording,
+  written once). A second writer is the size cap, the shelf cap, the payload
+  shape and the row bookkeeping drifting apart — which is a paper the button
+  saves and the export quietly does not, i.e. this very fault arriving through
+  its own fix.
+- **IT REUSES `_cpbLibId`**, or a paper exported six times is six rows on a
+  shelf that caps at `CPB_LIB_MAX`.
+- **AN UNNAMED PAPER IS STILL KEPT.** The 💾 button refuses without a name,
+  which is right for a deliberate save onto a NAMED shelf and exactly backwards
+  here: the papers nobody has got round to naming are the ones most likely to be
+  lost. The keep takes `_cpbPaperTitle()` — the title printed on the cover — and
+  keeps the paper even when that is empty too, because the shelf already labels
+  an empty name *Untitled paper*.
+- **A KEEP THAT DID NOT HAPPEN IS SAID OUT LOUD.** A teacher who believes the
+  paper is on the shelf and finds it is not has lost it in exactly the way they
+  were told they could not, which is worse than never promising. A success gets
+  the quiet status line instead — a costly invisible thing is a thing nobody
+  trusts.
+- **The automatic path never sets `_cpbLibBusy`**, so it neither greys the
+  page's buttons out nor repaints it while the teacher is printing.
+- **👁 Preview does NOT keep it** — a look is not an export. 🖨 from inside the
+  preview does, because `printFromPreview` routes `custompaper` straight back to
+  `cpbPrint`: ONE export door, or the preview's own printer silently keeps
+  nothing.
+- **The screenshots are still not saved**, which was already true of the 💾
+  button. Once the questions are read out of them the pictures are worth nothing
+  to a paper being edited, and megabytes against a 1 MB document.
+
+### 📚 Questions the bank already has (v1.371.0)
+
+`CPB_BANK_SHOWN` / `_cpbBankOpen` / **`cpbQuestionFromBank`** / `cpbBankCount` /
+`cpbBankOpen` / `cpbBankClose` / `_cpbBankFilters` / `cpbBankMatches` /
+`cpbBankRender` / **`cpbBankAdd`** (search `A QUESTION THAT IS ALREADY IN THE
+BANK`), the `toSend` filter in `_cpbCommit`, the `fromBank` count in `cpbSend`,
+the 📚 chip in `_cpbRowHtml`, plus `#cpbBankOverlay` and the `.cpbb-*` CSS.
+
+A sheet is not always all-new. Half of it is very often questions the bank
+already has — last term's, one written by hand, one off another paper — and
+until now the only way to put one on a Custom Paper was to find its screenshot
+again and have it read a second time, which files a DUPLICATE.
+
+- **A QUESTION THAT IS ALREADY IN THE BANK IS NEVER WRITTEN TO BY THIS PAGE, and
+  that is the whole safety story.** `_cpbCommit` sets `clean.holdBack = true`
+  and `clean.source = <paper name>` on everything it sends. Run over a question
+  that is already LIVE, that one line **withdraws it from every child in the
+  school** — out of every practice mode, every game, every quest and every other
+  worksheet using it — and re-files it under this paper's name, silently,
+  because the send reports only how many documents went. So a picked question
+  carries **`_cpbFromBank`** and `_cpbCommit` SKIPS it.
+  - **A COPY UNDER A NEW ID WOULD BE WORSE, not safer.** It looks like it keeps
+    the hold-back promise and does not: the ORIGINAL stays released, so a child
+    can still meet the question before sitting the paper — and the bank gains a
+    duplicate of every question picked, which is the very thing the duplicate
+    warning exists to prevent.
+  - **SO THE PROMISE IS NARROWED HONESTLY RATHER THAN FAKED.** The row wears a
+    📚 chip, the ③ card counts them and the send confirm says in as many words
+    that those questions are not sent, not changed and **not held back**. A
+    teacher who wants one held back does it on the 🗓 Scheduled Questions page,
+    where it is a deliberate act on a live question rather than a side effect of
+    building a paper.
+- **IT IS A DEEP COPY ON THE PAGE.** The paper is reordered, moved between
+  booklets, given marks and edited with ✏️ Edit, and none of that may reach
+  `questionBank` — the same reason 👁 preview deep-copies. Those edits live on
+  the paper, travel to the 📁 shelf with it, and stop there.
+- **`_wseBank()` IS THE ONE "what may go on a sheet" RULE**, shared with the
+  ✎ Questions drawer. A second list here would drift into offering a question no
+  student can ever be served. A question already ON the paper is dropped by its
+  own id — picked twice it would print twice, be numbered twice and be answered
+  twice — and an id the bank no longer has is REFUSED rather than pushed on as
+  `undefined`, because the picker's rows outlive a delete made in another tab.
+- **`cpbBankAdd` refuses a non-author IN THE HANDLER**, as `cpbBankOpen` does: it
+  reads the bank and puts a live question onto a paper, and a hidden button is
+  never the lock.
+- The overlay shows with **`.show`**, the house's own class — `.active` opens
+  nothing at all — and `cpbRender`'s rows are rebuilt wholesale, so the picker is
+  its own dialog rather than anything hung inside them.
+
+#### 🔢 …and a question that prints no marks is given the default (v1.371.0)
+
+**`cpbAutoMarks`** / `cpbMarksMissing` / `cpbAssignMissingMarks`, the call inside
+`cpbBankAdd`, and the 🔢 **Assign marks to N** button on the ③ card.
+
+`cpbDefaultMarks` says what an unmarked question is ASSUMED to be worth so the
+cover's total is never silently short. This is the other half: it writes that
+number onto the question, so the row, the printed `[2]` and the answer key all
+agree with the cover. A bank question very often carries no allocation at all,
+because a bank question is written to be practised rather than sat.
+
+- **IT NEVER OVERWRITES.** A question that prints ANY marks anywhere is left
+  alone — the paper it came off, or the teacher, has already said what it is
+  worth, and a default quietly replacing that changes what a class is marked out
+  of. `cpbQuestionMarks` is the ONE test both halves ask.
+- **A PART IS A QUESTION.** Each part prints under its own heading and is marked
+  on its own, so every part that OPENS gets the default rather than one number
+  three headings share. That is why a three-part question comes out worth 6 where
+  `cpbDefaultMarks` assumed 2 — the stamped total is the accurate one, and the
+  toast says what changed.
+- **`block.marks` IS THE FIELD, never characters in the wording** — the same
+  field the editor's Marks box writes, so `qPartBodyHtml` draws it and both print
+  builders print it with nothing else to teach.
+- **A QUESTION WITH NOWHERE TO PRINT A NUMBER IS LEFT ALONE.** Only a text block
+  may carry marks (`QPART_OPENER_TYPES`), so a question that is a picture and an
+  option list keeps the ASSUMED default rather than having one written where it
+  cannot show — and the toast counts those separately.
+- It runs on every bank pick **and** as a button, because the questions that most
+  often print nothing are the ones READ off a screenshot whose paper did not
+  allocate them, and those never go through the picker.
+- Run **`node tools/custom-paper-tests.mjs`** after touching any of it.
+
+### 👁 Preview one question of the paper (v1.367.0)
+
+`cpbPreviewQuestion` and the `'cpbq'` preview source, plus the SCOPED exported
+hover — `_vetPeekQuestion` / `vetPrintPeekButton(q, scope)` /
+`vetPrintPeekFull(id, scope)` / `vetPrintPeekEdit(id, scope)` — the 👁 on every
+row of `_cpbRowHtml`, and `vetPrintPeekHide()` at the top of `cpbRender`.
+
+The row said a question's title, its topic and its marks. **What it never
+showed was the question** — so checking that screenshot 12 really came out as a
+question, with its figure in the right place and its options under it, meant
+previewing the whole forty-question paper and scrolling to find it.
+
+- **IT IS THE SAME PREVIEW, NOT A SECOND ONE.** Hovering the eye opens the
+  shared exported hover; clicking it opens the ordinary ad-hoc preview — the
+  same builder, the same planner and the same printer the paper's own PDF goes
+  through. A proof of one question therefore cannot disagree with the sheet it
+  comes out on.
+- **TWO POOLS, ONE PEEK.** The 👁 was written for the Vetting list and resolved
+  `vettingList` by id inside `vetPrintPeekShow`. It now takes a **`scope`**, and
+  `_vetPeekQuestion(id, scope)` is the ONE resolver — `'cpb'` reads
+  `_cpbQuestions`, anything else reads `vettingList`, so a typo'd scope falls
+  back to the pool the eye has always read rather than making it silently dead.
+  Everything else — the open/close timers, the placement, the iframe scaling,
+  the teardown, Escape, the outside click — stays one implementation: a second
+  copy is a second copy to fix every positioning bug in, and the drift reads as
+  "the eye works on one page and misbehaves on the other".
+- **`'cpbq'`, NEVER `'custompaper'`, and collapsing the two is the one silent
+  failure here.** That other source means the WHOLE paper and is what
+  `printFromPreview` sends back to `cpbPrint()` — matched by a prefix, or reused
+  for a single question, pressing 🖨 on a proof of question 7 prints all forty
+  with both covers. The branch is an exact equality on `'custompaper'` and the
+  harness pins that there is no `=== 'cpbq'` and no `startsWith` beside it.
+- **Both are DRAFTS.** `_wsPreviewIsDraft()` and `_wsPreviewSnapshot` name
+  `'cpbq'` alongside `'custompaper'` and `'editor'`, so ✏️ edit question,
+  ✏️ edit answer, ✏️ Editing mode and the come-back-here snapshot all stand
+  down: an unsent paper's question is not in the bank at all, and `emSaveAll`
+  writes through `saveQuestion`.
+- **IT CARRIES THE QUESTION, NOT AN ID** — `previewOneQuestionPrint` looks in
+  `questionBank` or `vettingList` and would come back empty for every question
+  on the paper — and it is **deep-copied**, because `_cpbQuestions` IS the
+  paper and the preview must not be able to write back into it. The peek's
+  ✏️ **Edit question** goes to `cpbEditQuestion` for the same reason:
+  `editQuestion` would find nothing, so the button would do nothing at all.
+- **`cpbRender` hides the peek**, the rule `renderVettingList` already follows:
+  the rows are rebuilt wholesale on every mutation, so an open peek is pinned
+  to an anchor that is about to be destroyed.
+- The button wears `cpb-tool cpb-tool-eye` over `vet-print-eye` — the row's own
+  tool shape, keeping the shared focus ring and SVG sizing.
+- Run **`node tools/custom-paper-tests.mjs`** and
+  **`node tools/vetting-export-hover-tests.mjs`** after touching any of it.
+
+### 📸 Only the screenshots that have not been read (v1.366.0)
+
+`_cpbUnread` / `_cpbUnreadIsTail` / **`_cpbSeedQuestion`** / `_cpbLastRead`,
+`o.seed` on `readQuestionRun`, `cpbBuild` (append) beside **`cpbRebuild`**
+(the whole pile), `_cpbRunBuild(mode)`, and the `.cpb-pill-new` /
+`.cpb-new-line` states on the ② card.
+
+A mock paper is assembled over an afternoon: read what you have, find three
+more questions, paste them in. Re-reading the whole pile for those three was an
+AI call per batch of everything already done, minutes of waiting — and worse,
+it **REPLACED** the questions, so the order the teacher had put them in and
+every booklet they had moved by hand went with it.
+
+- **THE ORDINARY PRESS APPENDS.** 🤖 **Read the N new** reads only the unread
+  screenshots and adds their questions to the end. It asks nothing and destroys
+  nothing. 🔁 **Read everything again** is a separate button, still confirms,
+  and still does exactly what it always did — and its confirm points at the
+  other one, so nobody presses the destructive button to add three questions.
+- **THE ONE THING AN APPEND CAN GET WRONG IS THE JOIN**: a question whose stem
+  is on the last screenshot already read and whose parts are on the one just
+  pasted in. That is the `continuation` case the reader has always handled
+  INSIDE a run; **`o.seed` is what carries it ACROSS runs**. Without it, the
+  added screenshot becomes a second question with no stem and no figure —
+  exactly the failure the PDF importer's page-break stitch exists to prevent,
+  arriving by a different door.
+- **THE SEED IS ONLY HONEST WHEN THE UNREAD SCREENSHOTS ARE THE END OF THE
+  PILE** (`_cpbUnreadIsTail`). A failure in the middle, retried after the ones
+  after it were read, is **not adjacent** to the question the last run finished
+  on — joining them would graft two unrelated questions together, and the
+  result reads as a perfectly ordinary question. That is the one silent
+  failure this feature can produce, so the tail test refuses rather than guesses.
+- **`_cpbLastRead` IS AN ID, never the object.** The list is reordered, edited
+  and rebuilt continuously, so a held reference goes stale in a way nothing on
+  screen would report. It is cleared wherever the paper changes underneath it:
+  a question taken off, a saved paper opened (its screenshots did not come
+  with it, so there is no pile to carry on from), ✚ New paper, and a full send.
+  A stale id simply seeds nothing — the entry becomes its own question, which
+  is the safe direction.
+- **A FAILED screenshot counts as UNREAD**, so the same button retries it
+  rather than needing a whole re-read; an `empty` one is read (it held nothing)
+  and is not offered again.
+- **THE JOIN IS A FACT THE RUN REPORTS, not arithmetic.** An extended question
+  is never added to the list, so counting the totals before and after can never
+  see one — `onExtend` sets the flag by identity against the seed.
+- **ADDING A SCREENSHOT NO LONGER SETS `_cpbDirty`.** That warning now means
+  one thing only: *a screenshot the paper was built from has been REMOVED*, so
+  a question on the page may no longer match anything anybody can look at, and
+  🔁 is the fix. Nagging on an add would send the teacher to the destructive
+  button for the ordinary case. The two lines are mutually exclusive and
+  coloured apart — amber for "out of step", blue for "more to read".
+- **The seed is read BEFORE the run resets any status**, or `_cpbUnreadIsTail`
+  is asked about a pile that has just been wiped and always answers no.
+- The read/unread state lives on each screenshot's own `status` and the join
+  point rides the draft record, so a reload picks the pile up exactly where it
+  was.
+- Run **`node tools/custom-paper-tests.mjs`** after touching any of it.
+
+## 🎯 A blank box the PUPIL writes their objectives in (v1.369.0)
+
+`OBJBOX_*` / `objBoxLines` / `objBoxLabel` / **`objBoxPrintHtml`** /
+`objBoxScreenHtml` / `objBoxPreviewHtml` / **`objBoxAutoHtml`** /
+`OBJBOX_SWITCHES` / `objBoxPrintOn` (in `app.js`, search
+`🎯 LEARNING OBJECTIVES BOX`), the `objectivesBox` block type, the
+`.print-objectives-*` / `.ws-objectives-line` CSS, and the 🎯
+**Learning-objectives box on every question** switch on all three printing
+surfaces.
+
+An element block: a blank rounded rectangle, **two ruled lines by default and
+any number from one upwards**, that an author drops into a question — or that
+the printing options put at the foot of EVERY question at once. It is where a
+pupil writes, in their own words, what they were learning.
+
+- **IT IS NOT THE 🎯 LEARNING OBJECTIVES PAGE, and confusing the two is the
+  whole reason it is not called `lo*`.** That system (`lo*`, `q.los`,
+  `loQuestions`, `loSuggestLos`) is the ADMIN's filing — which MOE syllabus
+  outcome a question is tagged under, chosen by a teacher, never a box on a
+  sheet. This is the opposite end: an empty rectangle with nothing stored in it
+  and nothing to mark. Sharing a prefix between them is how a filing helper ends
+  up called from a print path, so this one is `objBox*` / `OBJBOX_*` throughout.
+- **NOTHING ABOUT IT REACHES THE ANSWER KEY.** There is no right answer to
+  "what did you learn", so `_pushBlockAnswerKey` has no case for it and both
+  explicit print cases deliberately push nothing. A key row against a reflection
+  box is a row a teacher cannot mark, and it reads as a printing fault. That is
+  also why the harness pins it from both directions.
+- **`objBoxLines` is the ONE place a stored number becomes ruled lines, and it
+  FAILS TO THE DEFAULT.** Junk, an absent field, zero or a negative all give two
+  lines — a box with no lines in it is a box a pupil cannot write in, and it
+  renders perfectly. `OBJBOX_LINES_MAX` (20) caps it: a taller box is a page.
+- **`objBoxLabel` must NOT fall back on an EMPTY label.** `|| OBJBOX_LABEL`
+  would put the heading back on a box the author had just cleared — and "blank"
+  is what was asked for. Only an ABSENT field takes the default, which is what
+  makes a block written before this existed still carry a heading.
+- **ONE VISUAL, TWO SKINS, and both read the same two helpers.**
+  `objBoxPrintHtml` is styled by `.print-objectives-*` in the print CSS;
+  `objBoxScreenHtml` is inline-styled for the reason `ws-open-lines` is (these
+  blocks render into half a dozen surfaces that share no stylesheet). Neither is
+  free to decide the size for itself, or the A4 preview stops being a preview.
+- **`renderImportedBlockStudent` is the screen case** — the default branch of
+  every practice render switch — so practice, quick practice and topical all get
+  it from one case. `renderQuestionBodyPreviewHtml` DRAWS the box rather than
+  describing it: that preview sits beside the printed sheet in the duplicate
+  comparison and the ✎ Questions drawer.
+- **BOTH print builders carry an explicit case through `objBoxPrintHtml`**, the
+  rule `_printMcqBlockHtml` already exists for. `doPrintWorksheetOpen` and
+  `buildWorksheetHtml` had drifted over the MCQ answer once; a box that appears
+  on a worksheet printed from the bank and not on the same worksheet printed
+  from 📄 My Worksheets is that fault wearing a new hat.
+
+### 🎯 …and one box in EVERY question, from the printing options
+
+- **`objBoxAutoHtml(q, on)` is the ONE injector** and both builders call it at
+  the same point — after the block loop, INSIDE the question chunk. Emitted
+  after the chunk's closing `</div>` the box belongs to no question at all and
+  the planner measures it against the wrong page.
+- **It is `on` AND the question has no box already.** The switch promises ONE
+  box per question; a question the author already gave a box would otherwise
+  print two, the second at a size they never chose.
+- **NOTHING IS WRITTEN TO ANY QUESTION.** It is a rendering option, so ticking
+  it changes no document anywhere and unticking it takes every automatic box off
+  again. What it makes is a DEFAULT box.
+- **`OBJBOX_SWITCHES` names a checkbox per surface and an unknown surface
+  returns FALSE**, the shape `WNY_SWITCHES` / `AKX_SWITCHES` already use: a
+  default falling through to another page's checkbox would put a box on every
+  question of a print started from here because of a switch set somewhere else,
+  with nothing on the screen able to explain it. **`paper` is deliberately
+  absent** — a past paper is a reproduction of somebody else's sheet.
+- **The LIVE A4 preview reads the same switches** (`_wsPreviewCtx` →
+  `objectivesBoxAll`), or the preview is a preview of a different sheet. The
+  past-paper branch is explicitly `objBoxAll: false` rather than merely absent.
+- **…and so must every OTHER surface that shows a proof of a sheet** (v1.369.1).
+  Two of them read a different set of switches from the printer that makes the
+  sheet, and both looked like a working preview:
+  - **🗂️ Custom Paper sets `objectivesBoxAll: false` in `buildOpts`, in BOTH
+    modes.** `cpbPrint` calls `buildWorksheetHtml` with those `buildOpts` and
+    gets `false` by default — but its PREVIEW goes through `_wsPreviewCtx`'s
+    ADHOC branch, which reads the 🖨 print picker's own `printIncludeObjBox`,
+    and `buildOpts` is assigned OVER that base object. Merely absent, a teacher
+    with that box ticked sees a 🎯 box on every question of the preview that the
+    exported paper does not have.
+  - **The 👁 Vetting hover reads `objBoxPrintOn('bank')`** beside the
+    `wnyPrintOn('bank')` / `akxPrintOn('bank')` it already read. Its own
+    "Open full preview" opens `previewOneQuestionPrint` on the SAME question,
+    which does read it — so leaving it out is one question with two proofs that
+    disagree.
+- The height needs no reservation: the CER planner MEASURES the finished page
+  in a print-CSS iframe, so an extra box re-paginates for free. What it does
+  need is the `.print-chunk-tall` / `.print-page-tall` release — a box that
+  keeps `break-inside: avoid` on a page that is already flowing does not flow,
+  it overflows onto the next question.
+- **A question carrying a box is not "MCQ only"** (`qIsMcqOnly`): a box is
+  somewhere a pupil WRITES, and on 🗂️ Custom Paper that decides the booklet —
+  Booklet A is answered on a separate answer sheet, where there is nowhere to
+  write it.
+- **`polymathlc/math` carries the same block** — same block type, same helper
+  names, same two switches. Ship a change to both together.
+- Run **`node tools/objectives-box-tests.mjs`** after touching any of it.
+
+## 🖼 The image engine — ChatGPT Images 2.5 for EVERY picture (v1.372.0)
+
+`OPENAI_IMAGE_DEFAULT_MODEL` / `OPENAI_IMAGE_MODELS` / `OPENAI_IMAGE_25_RE` /
+`OPENAI_IMAGE_SUPERSEDED` / `OPENAI_IMAGE_GEN` / `getOpenAiImageModel` /
+`openAiImageModelOptionsHtml` / `AI_IMAGE_ENGINES` / `AI_IMAGE_ENGINE_DEFAULT` /
+`_aiImageFromDoc` / `aiImageEngineSetting` / `imageEngineOrder` /
+`imageOpenAiPossible` / `imageEngineLabel` / `openAiGenerateImageDataUrl` /
+`openAiImageServer` / **`generateImageDataUrl`** / `imageRouteReport` /
+`aiEngineImageChoicePreview` (in `app.js`, search `THE IMAGE ENGINE`), the
+`openAiImage` callable in `polymathlc/math/functions`, the **Pictures** radios
+and the image-model dropdown in the AI Engine dialog, and `cleanFigureChatGpt`
+in `mistakes.html`. **`polymathlc/math` and `polymathlc/anskey` carry the same
+block — ship a change to all three together.**
+
+Every picture this app draws — card art, avatars, pack frames, artifacts,
+heroes, set banners, lore plates, the 🖼 answer-key and explanation diagrams,
+the redrawn exam figures, the scan clean-up, the ✏️ Touch up editor's AI fill
+and ✨ Regenerate, the Try-again sheet's figures — is drawn by **ChatGPT Images
+2.5** now. OpenAI shipped it on 8 September 2026 with two API models:
+`gpt-image-2.5-flare` (its own default for most work — higher quality than
+gpt-image-2 at half the latency) and `gpt-image-2.5-sunburst` (premium edits,
+slower). Both take `quality` low / medium / high / **xhigh** / **max**,
+`background: transparent` outright, arbitrary WIDTHxHEIGHT sizes (both sides
+divisible by 16, aspect 1:3 to 3:1) and up to 16 reference pictures on an edit
+with `input_fidelity`. Both cost the same.
+
+- **BEFORE THIS, WHICH MODEL DREW WAS TWO ACCIDENTS.** The ChatGPT image model
+  fired only when this browser held an OpenAI key AND the *text* engine was
+  set to ChatGPT; every other picture — and every picture on a student's
+  phone — was Gemini's. A decision about MARKING was deciding what a monster
+  looks like. **The image engine is its own setting now** (`aiImageEngine`, a
+  field on the same centre-wide `config/admin` document as the text engine,
+  same merge write, same live listener), defaulting to ChatGPT Images.
+- **`generateImageDataUrl(prompt, opts)` IS THE ONE DOOR.**
+  `generateEnhancedImageDataUrl`, `_diagramDraw` and `_tcgGenOnce` all go
+  through it, so the order the routes are tried in is decided in exactly one
+  place. `generateImageDataUrlGemini` is the RAW Gemini route and is reached
+  only from inside the door; `tools/image-engine-tests.mjs` carries a census
+  that fails on the next caller that reaches it — or `geminiImageModels`, or
+  `openAiGenerateImageDataUrl` — directly, because that caller is a surface
+  that quietly stayed on Gemini while every other picture moved.
+- **THE SERVER ROUTE IS WHAT MAKES THE CHOICE REAL.** `openAiImage` is a
+  callable holding the same `OPENAI_API_KEY` secret `askOpenAi` does, so a
+  device nobody has typed a key into — every student's phone, and
+  `mistakes.html`, which runs on nothing else — draws with ChatGPT Images too.
+  It is deployed by the Maths repo's `deploy-functions.yml` when its PR merges.
+  Until then it answers `failed-precondition`, the route is marked down for
+  `AI_DOWN_MS` and the chooser says **in those words** that the image function
+  is not deployed yet. A key in this browser is the route BEHIND the server,
+  and Gemini's image model is the route behind that: the fallback, never the
+  plan, and never dropped — the day the OpenAI account is out of credit is a
+  slower picture rather than no picture.
+- **THE SERVER PINS THE MODEL TO THE 2.5 FAMILY.** The client passes the model
+  it chose; the callable honours it when `OPENAI_IMAGE_MODEL_RE` says it is a
+  2.5 id and falls back to Flare when it is not, because a client that could
+  name a model could name an expensive one and the bill is the centre's. It
+  validates every field (size, quality, background, output format, fidelity)
+  into an `invalid-argument` the page can print, rather than a 400 it has to
+  guess at, and it counts on ITS OWN throttle fields (`openAiImgDay` …): a
+  card-art batch must not close the text engine for the day.
+- **A REFUSAL ABOUT ONE PICTURE DOES NOT CLOSE THE ROUTE** (`_imgRouteFault`).
+  An `invalid-argument` — a size the model will not take, a prompt its safety
+  layer declined — says nothing about the route, so it falls through to the
+  next one and marks nothing down. A 401, a billing 400, a `failed-precondition`
+  do mark the route down, exactly as the text routes are.
+- **NO EDIT SENDS `input_fidelity` TO THE 2.5 FAMILY** (v1.373.1 — see 🩹
+  below): the gpt-image-2 models read every reference at high fidelity by
+  default and REFUSE the parameter, so `_imgFidelityFor` sends it to
+  gpt-image-1 alone. An edit keeps the reference's own shape by sending NO
+  size (`_imgSizeField` — the API's default is auto) unless the caller names
+  one; a picture drawn from nothing is square. Several references go up as
+  `image[]`, one as `image`.
+- **A DEFAULT NOBODY CHOSE IS NOT A CHOICE.** Every device that ever saved the
+  dialog is carrying `gpt-image-1` pinned in its own settings, so
+  `OPENAI_IMAGE_SUPERSEDED` is lifted to Flare **once** per device
+  (`OPENAI_IMAGE_GEN`), exactly as the chat model's lift works; a deliberate
+  re-pick of a legacy model afterwards sticks. A stored id the dropdown no
+  longer offers is the DEFAULT, never a 404 on every picture. `xhigh` / `max`
+  are clamped to `high` on a legacy model (`_imgQualityFor`).
+- **`imageAiReady()` counts ChatGPT Images as an image model**, so a project
+  with no Gemini image model is no longer a project with no pictures. It is
+  guarded because it is read during module evaluation.
+- **The dialog says what is happening** — `imageRouteReport` prints the picture
+  order, the model and what each route last said, beside the text order —
+  because an app quietly drawing with Gemini looks exactly like one drawing
+  with ChatGPT Images, only a little worse.
+- Run **`node tools/image-engine-tests.mjs`** after touching any of it.
+
+### 🟩 The green box — which model drew the picture (v1.373.0)
+
+`imageLastCall` (now carrying `model` / `engine`) / `_imgRouteModel` /
+`imageEngineDescribe` / `IMG_BADGE_MS` / **`imageAnnounce`**, the
+`type 'image'` branch of `showToast` and `.toast.image` in `index.html`; the
+same shape in `mistakes.html` under `#imgBadge`. **`polymathlc/math` and
+`polymathlc/anskey` carry the same block — ship a change to all three.**
+
+A picture comes out whichever model drew it, and the three routes above make
+that a real question: a redrawn figure could have come from Flare on the
+server, Flare on a browser key, or Gemini after both refused, and nothing on
+any screen said which. So every generated picture — anywhere in the app —
+raises a **green box, bottom right**: *🖼 Picture generated by ChatGPT Images ·
+gpt-image-2.5-flare · server key*, or *Gemini · gemini-2.5-flash-image*, with
+*(after another route refused)* when the first route did not answer.
+
+- **IT IS RAISED FROM THE ONE DOOR** (`generateImageDataUrl`), so every
+  picture surface — and one added next month — announces itself without being
+  told. `mistakes.html` has no door and carries its own copy because it loads
+  nothing from `app.js`.
+- **EVERY ROUTE RECORDS THE MODEL THAT ANSWERED, and the door CLEARS it before
+  each attempt.** The server route takes `d.model` from the callable's reply
+  (the server may have pinned the client's pick to Flare); the key route records
+  the id it asked for; the Gemini route reads `AI_IMAGE_MODELS[i]` by index,
+  because `geminiImageModels` is built 1:1 from that list and a model object's
+  own `.model` is not reliably readable. Without the clear, a route that
+  REFUSED would leave its id on the box for the route that answered.
+- **ONLY A SUCCESS ANNOUNCES.** A failure leaves `imageLastCall` empty and
+  raises nothing — a green box over a picture that never arrived is the one
+  thing this must never do.
+- **A FIXED GREEN, NEVER `--primary`.** Realm of Embers re-skins the tokens to
+  gold, and a box that changed colour with the page would stop reading as the
+  one signal it is.
+- **HELD FOR `IMG_BADGE_MS` (6.5 s), and a repeat stacks a ×N.** A model id is
+  read, not glanced at; and a card-art batch of forty from one model is ONE
+  box with a count rather than forty boxes.
+- The AI Engine dialog's `imageRouteReport` prints the same describer's line,
+  so the last picture's model can be checked after the box has gone.
+
+### 🩹 The 2.5 family REFUSES `input_fidelity` — every edit was Gemini's (v1.373.1)
+
+`OPENAI_IMAGE_FIDELITY_RE` / `_imgFidelityFor` / `_imgSizeField`, the widened
+`_isUnsupportedImageParam`, `_imgRefusalText` / `_imgRefusal` / `refusedBy` on
+`imageLastCall`, and the `openAiImage` callable's dropped `input_fidelity`.
+
+The green box shipped and immediately said *Gemini · (after another route
+refused)* on a redrawn explanation diagram — with the server function deployed
+and a real key on it. Both ChatGPT routes were refusing the SAME request, which
+means the request, not the routes: **`input_fidelity` is a gpt-image-1 knob.**
+The gpt-image-2 family reads every reference at high fidelity by itself and
+answers the field with a 400 — *"does not support the 'input_fidelity'
+parameter"* — and v1.372.0 sent it on every edit, which is every avatar, every
+redrawn figure, every explanation diagram and every scan clean-up.
+
+- **THREE THINGS HID IT, and each was reasonable on its own.** The retry net
+  matched "not supported" and the API says "does not support" — one word, no
+  retry. A 400 is deliberately NOT a route fault (`_imgRouteFault`), so nothing
+  was marked down and the chooser had nothing to report. And the fallback
+  WORKED: Gemini drew the picture, so the only symptom was the badge.
+- **`_imgFidelityFor(model)` is the ONE rule**: `'high'` for `gpt-image-1` /
+  `gpt-image-1-mini` and their snapshots, `''` for everything newer — 1.5, 2
+  and both 2.5 models. The server sends it to nobody (it pins the model to
+  2.5) and IGNORES a client still passing `inputFidelity`, because the clients
+  shipped before this fix do.
+- **`size: auto` is never sent as a word either** (`_imgSizeField`). Leaving
+  the field out asks the API for its own default, which IS auto, and a model
+  that does not list the word among its sizes cannot refuse it.
+- **The retry net is wide now** — unknown / unrecognised / unsupported / not
+  support / invalid value / additional propert / not allowed|permitted — so
+  the next parameter a model stops taking earns one bare retry rather than
+  falling through.
+- **THE BADGE SAYS WHO REFUSED AND WHY.** *(after ChatGPT Images (server key)
+  refused: The model 'gpt-image-2.5-flare' does not support the
+  'input_fidelity' parameter.)* — transport prefixes stripped, clipped to
+  `IMG_REFUSAL_CHARS`. A box that only said "another route refused" was the
+  right signal and not enough of one. `_imgRefusal[route]` keeps every route's
+  last refusal whether or not it closed the route, and `imageRouteReport`
+  prints it, so the AI Engine dialog answers the same question after the box
+  has gone.
+
+## 🔍± Picture size, from a preview — resized where it is READ (v1.375.0)
+
+`PVS_IDLE_MS` / `PVS_REPLAN_MS` / `PVS_CSS` / `pvsAllowed` / `pvsFind` / `pvsBarHtml` /
+`pvsWrapAttrs` / `pvsDocs` / `pvsWraps` / `pvsPaint` / **`pvsStep`** / `pvsReset` /
+**`pvsFlush`** / `pvsDecorateDoc` (in `app.js`, search `PICTURE SIZE, FROM A PREVIEW`),
+`imgScaleStep` and the element-taking `_imgRenderedPct`, the `pvsWrapAttrs` on both
+print builders' pictures, the `pvsDecorateDoc(doc)` at the foot of `_wsPreviewPack`,
+and the `pvsFlush()` at the top of every preview's close. **All three portals carry
+the same block byte-for-byte, and the Maths app carries its own — ship a change to
+all four together.**
+
+Resizing a picture is the commonest edit a question ever gets, and it lived behind ✏️ Edit:
+open the editor, find the block, press + four times, Save, find the way back. Every surface that
+PREVIEWS a question — the past-paper hover, the bank hover in the attach picker, the 👁 exported hover in Vetting, the A4 preview, ✅ Check Questions, the Question Doctor, the ✎ Questions drawer and the ⇄ duplicate comparison — now carries a **− / + pill on every picture**, and the size is
+**saved to the question bank when the preview closes**.
+
+- **`block.scale` IS THE FIELD** — the same one the editor's own +/− writes and the renderer reads —
+  so a size chosen on a preview prints, practises and previews exactly as one chosen in the
+  editor. There is no second number, and `imgScaleStep` is the ONE stepper (5% a press, floored at `IMG_SCALE_MIN` and capped at
+  `IMG_SCALE_MAX`), so + means the same thing on a preview as
+  on the block card.
+- **THE WRITE HAPPENS WHEN THE PREVIEW CLOSES, not on every press.** A teacher presses + four
+  times to find the size, and four writes of the same document for one decision is noise on the
+  wire. `_pvsDirty` holds the questions touched; every preview's close calls `pvsFlush`. A
+  surface with no close of its own is flushed `PVS_IDLE_MS` after the last press, and `pagehide`
+  flushes whatever is left, so a tab closed with a hover still open does not lose the edit.
+- **THE QUESTION IS RE-RESOLVED BY ID at press time and at write time** (`pvsFind`, bank first
+  then the vetting list). The bank is re-read and re-assigned wholesale elsewhere, and a hover
+  outlives that. A vetting question is written through `saveVettingQuestion`, a bank question through `saveQuestion` — the two doors every committed
+  question already goes through — and QUIETLY: a picture nudged is housekeeping, not a question
+  authored, so it must not land in anybody's work-session log or announce itself to every other tab. A write that did not land keeps
+  the question DIRTY for the next flush and says so; a question deleted between the press and
+  the flush is skipped, never resurrected.
+- **ONLY AN AUTHOR GETS THE PILL, AND THE HANDLER ASKS AGAIN** (`_canAuthor()`). A student's device
+  renders the very same preview, and a hidden button is not a lock. A draft with no id (the
+  left-hand side of the duplicate comparison) gets no pill either: a pill that cannot name what
+  it changes is a button that does nothing.
+- **EVERY COPY OF THE PICTURE ON THE PAGE IS REPAINTED TOGETHER** (`pvsPaint`, through the
+  `data-pvs-q` / `data-pvs-b` attributes on the wrapper), iframes included, so the hover, the
+  card underneath it and the A4 sheet cannot show three different sizes. Only the WIDTH
+  properties are touched, so a preview's own border-radius or print class is left alone. **The
+  question open in the EDITOR follows too** — its own block card is updated when it is this very
+  question — or pressing Save there a minute later puts the old size straight back. It must be
+  THIS question: duplicated questions share block ids, so a match on the block id alone would
+  resize a different question's picture.
+- **A PREVIEW INSIDE AN IFRAME GETS ITS PILLS HUNG AFTERWARDS** (`pvsDecorateDoc`, from the foot
+  of `_wsPreviewPack`). The exported pages were MEASURED by the planner before the pill exists,
+  so it sits OVER the picture's top-left corner and takes no layout height; both print builders
+  tag every picture with `pvsWrapAttrs(q, block)` so the decorator can find it. The inline
+  `onclick` written into the pill resolves against the IFRAME's window, which has no `pvsStep`,
+  so the decorator BINDS the handlers to this document's functions instead. The A4 preview is
+  then re-planned (`renderWsPreview`, `PVS_REPLAN_MS` after the last press) because a picture
+  that changed size changes where the page breaks; the 👁 peek is a peek and is not.
+- **The stylesheet is ONE string** (`PVS_CSS`), injected into whichever document is showing a pill
+  — the app's own or an iframe — rather than a copy in `index.html` and a copy in the print CSS
+  that would drift. `@media print` hides it.
+- **Every press stops its own propagation.** The pill sits on a chip that attaches, a tile that
+  picks and a card that selects; a + that also fired the click under it is a + that files a
+  question somewhere.
+- Run **`node tools/preview-picture-size-tests.mjs`** after touching any of it.
+
+## 🏷 Every search box reads the TAGS (v1.377.0)
+
+`extractQuestionSearchText` already put `qTagList(q)` into the haystack the
+Question Bank, the Vetting list, the worksheet builder, the community quest
+picker, the 🗂️ Custom Paper bank picker, the ✎ Questions drawer and the 🎯
+objective picker all read — so "expansion" typed into any of those already
+found every question TAGGED expansion. **Five boxes built their own haystack
+and left the tags out**, and every one of them was silent about it: the box
+searched, the list narrowed, and the tagged questions were simply not in it.
+
+- **🔑 Answer Keys** (`renderAnswerKeysPage`) read the title and the topic;
+  **🗓 Scheduled Questions** (`renderScheduleQuestionList`) the title, both
+  topics and both categories; **📄 Past Papers' assign list**
+  (`ppRenderAssignList`) the title, topic, category and preview; **the
+  concept picker** (`ppRenderConceptPicker`) a paper row's year, number,
+  topic and title; and **📊 the Student Usage Tracker** (`sutVisible`) the
+  row's title and its topic · category line. All five read the tags now.
+- **THE CONCEPT PICKER'S ROWS ARE PAPER ROWS, NOT BANK QUESTIONS.** A paper
+  row has no tags of its own; the bank question ATTACHED to it through
+  `paperMap` does, so that question's title and tags are searched beside the
+  row's own fields — through ONE `Map` built per keystroke rather than a
+  `find` per row over the whole bank.
+- **THE TRACKER'S TAGS ARE SEARCHED AND NOT PRINTED.** `sutQuestionMeta`
+  carries them as a separate `tags` string; `meta` stays the topic · category
+  line, because a row wearing twelve tags beside its topic is a row nobody can
+  read. `tools/usage-tracker-tests.mjs` pins both halves, and stubs
+  `qTagList` in its fixture because the real one lives beside the editor, far
+  above the cut.
+- **A tag is read through `qTagList`, always** — never `q.tags` raw — so a
+  search agrees with the tag filter and the tag chips about what a tag IS
+  (whitespace folded, a bare number dropped, clipped and capped).
+- The Mindmap app (`polymathlc/mindmap`), which pins questions out of this
+  bank onto shapes, mirrors the same rule in its picker (`tagsOf` /
+  `searchText`), so "expansion" finds the same questions there as here.
+- Every placeholder on those boxes now SAYS tags are searched. A box that
+  searches something its label does not name is a feature nobody discovers.
+
+## 🐾 Learning from mistakes — the mistake bank (v1.391.0)
+
+`MISTAKE_ANIMALS` / `mistakeAnimal` / `mistakeAnimalNormalize` / `mistakeAnimalLabel` /
+`MISTAKE_ANIMAL_RULE` (the shared taxonomy), `MK_COLLECTION` / `_mkOwnerUid` / `_mkBankCol` /
+**`_mkEntryFromAnalysis`** / `_mkCandidatesFrom` / `_mkSort` / **`_mkVisibleToStudent`** /
+`_mkQuizOptions`, the admin half — `mkRender` / `mkHarvest` / `mkAnalyseAll` /
+`mkAnalyseCandidate` / `mkApprove` / `mkReject` / `mkDelete` / `mkSaveCard` /
+`mkGenerateRun` / `mkGenerateOne` — and the student half — `mkStudentRender` / `mkStart` /
+`mkPick` / `mkReveal` / **`mkCheckRewrite`** / `_mkLogQuiz` (in `app.js`, search
+`LEARNING FROM MISTAKES — the mistake bank`), plus `#page-mistakebank` (admin) and
+`#page-mistakes` (student) in `index.html`, the `mistakes` row in `USAGE_MODES`, and the two
+nav items.
+
+A wrong answer is the most useful thing a class produces, and this app threw every one of them
+away the moment it was marked. The 🐾 **Mistake Bank** keeps them: the teacher harvests the wrong
+and partly-right answers out of the attempt log, the AI CLEANS each one up and names the HABIT
+behind it as one of the **nine Science Sidekicks' skills, missing** (🦎 Comparison Casey — missed
+the comparison, 🐘 Evidence Ellen — ignored the evidence, 🦊 Specific Sherry — too vague, …; it was
+a list of ten animals of its own until v1.394.0), the teacher VETS and SORTS them, and only then are they
+served back to students — as a "which mistake is this?" quiz, or one animal at a time with a
+rewrite box under it.
+
+- **THE NINE TYPES ARE ONE LIST IN THREE APPS, BYTE FOR BYTE.** `MISTAKE_ANIMALS` is identical
+  in `polymathlc/scan` (which tags every marked answer with one) and `polymathlc/anskey` (whose
+  🐾 Mistake button writes an answer that is wrong on purpose in one of them). The `id` is the
+  contract: an entry filed here under `specific` has to mean what Scan's `specific` means, or the
+  same habit wears a different animal in each app. **Ship a change to the block to all three
+  together.** The ids are the Science Sidekicks' own (`comparison` / `context` / `specific` /
+  `evidence` / `keywords` / `concept` / `reasoning` / `careful` / `complete`), so the coach that
+  says what the answer needs NEXT and the animal that names the habit are ONE figure; the old
+  ten-animal ids (`fox`, `parrot`, `sloth`, …) are carried to their Sidekick by
+  `MISTAKE_ANIMAL_ALIASES` inside `mistakeAnimalNormalize`, and `_mkNormaliseEntry` applies that
+  to every stored entry on the way in, so nothing already filed reads as an unknown mistake.
+- **`mistakeAnimalNormalize` IS THE ONE DOOR, AND "NONE" IS A REAL ANSWER.** Every id reaching
+  the bank goes through it — an id, an animal's name, a habit's name or a `{animal}` object all
+  come out as the id, and *unsure* / *none* / an invented animal come out as `''`. A wrong answer
+  that fits no habit is filed with NO type rather than the nearest one: a wrong label teaches a
+  wrong lesson with a straight face. `MISTAKE_ANIMAL_RULE` says so to the model in as many words,
+  and it forbids a type on a correct answer or on a blank.
+- **A STUDENT'S OWN WORDS NEVER CARRY THE STUDENT.** `_mkEntryFromAnalysis` is the ONE builder
+  and it writes no `uid`, no email, no name — only the question, the cleaned answer, the animal,
+  why, the fixed answer, a hint, the attempt id it came from and a hash. The one field that could
+  identify a child by its wording, `raw`, is kept on a PENDING entry so the teacher can check the
+  clean-up against what was actually written, and **deleted on approve** (`raw: deleteField()`),
+  so what students read was never anybody's exact words. A generated example never carries it.
+- **THE CLEAN-UP MUST KEEP THE MISTAKE.** `_mkAnalysePrompt` asks for the spelling and the
+  grammar tidied and the science left exactly as wrong as it was, because an answer cleaned into
+  a right one is a lesson about nothing. Two guards refuse an entry outright: fewer than
+  `MK_MIN_ANSWER_WORDS`, and a `worth: false` from the model — a one-word wrong answer is not a
+  mistake anyone can learn from.
+- **NOTHING REACHES A STUDENT UNVETTED, AND `_mkVisibleToStudent` IS THE ONE GATE.** It asks five
+  things: `approved`, a real animal (an entry the teacher approved with no type is a card the
+  quiz cannot ask about), an answer and a question, and — when the source question is still in
+  the bank — `qAvailableToViewer` **and** `qInSyllabus` **and** `qWithinStudentLevel`. A mistake
+  on a held-back paper, a retired topic or a Sec 1 question is served to nobody it should not be,
+  because the pool reads the same three predicates every other student-facing pool reads. The
+  release census in `tools/scheduled-release-tests.mjs` counts it.
+- **HARVEST, ANALYSE, VET — THREE SEPARATE PRESSES, and the middle one is the only one that
+  costs.** 🔎 reads the newest `MK_HARVEST_SCAN` attempts and makes ONE candidate per WRONG PART
+  (`_mkCandidatesFrom` — a three-part question wrong in two parts is two lessons), skipping any
+  attempt already in the bank and any question no longer in it. ✨ analyses at most
+  `MK_HARVEST_MAX` of them, `MK_PAR` at a time, with ⏹ honoured between calls; the same wrong
+  answer twice is one entry (`hash`). Every entry lands PENDING. The teacher then approves,
+  changes the animal, edits the words, or rejects — and `_mkWrite` is the ONE writer for all of it.
+- **THE ANALYSIS IS GROUNDED AS `'teach'`, THE REWRITE CHECK AS `'mark'`.** A lesson about a
+  mistake has to be in this teacher's words and against this teacher's standard, so
+  `mkAnalyseCandidate` and `mkGenerateOne` carry `aiGrounding('teach', topic, question)` — and
+  the question's own diagrams go along through `_cqMedia`, because a habit is judged from what
+  was asked. `mkCheckRewrite` marks a pupil's rewrite and is grounded `'mark'`: a marker is never
+  handed the exemplars, and the correct answer it sees is the entry's own. Both call sites pass
+  the grounding census.
+- **✨ WRITE WRONG ANSWERS invents examples where the class has not made the mistake yet.** The
+  teacher picks a topic and an animal, `mkGenerateOne` asks for an answer a real pupil would
+  plausibly write with exactly that habit and everything else right, and it is filed
+  `source: 'generated'` and PENDING like everything else — the teacher vets an invented mistake
+  exactly as they vet a real one. `MK_GEN_MAX` caps one press.
+- **THE STUDENT SIDE IS THREE MODES OVER ONE POOL.** 🐾 *Learn from mistakes* serves a shuffled
+  mix and asks the animal, then offers the rewrite; ❓ *Quiz* asks the animal and nothing else;
+  and each animal's own card serves that habit alone, with the reveal and the rewrite. All three
+  read `_mkStudentPool`, which reads `_mkVisibleToStudent`, so a mode cannot drift into serving
+  what the others refuse. `MK_SESSION_MAX` bounds a sitting. The four quiz options come from
+  `_mkQuizOptions` — the right animal is always among them and never twice.
+- **THE QUIZ IS LOGGED, AND PAYS NOTHING.** Each animal pick lands in `questionAttempts` under
+  mode `'mistakes'` through `_mkLogQuiz`, so the 📊 Student Usage Tracker shows it (the row is in
+  `USAGE_MODES`). It deliberately does **not** call `rpgAwardGameQuestion`: a four-option guess
+  at an animal is not a science question answered, and points are never earnable from a
+  repeatable button.
+- **IT NEEDS ONE FIRESTORE RULE**, and the failure without it is silent on the student side:
+  `users/{adminUid}/mistakeBank/{id}` — the admin reads and writes, any signed-in user reads.
+  Until it is pasted the admin page names the denial (`permission-denied` is spelled out in the
+  toast), and the STUDENT page deliberately does not: a denied read is not an error worth showing
+  a child, so it reads as "nothing to practise yet" — which is also why the admin's own page is
+  where a missing rule has to be noticed. The bank lives under the admin's uid and a student
+  resolves it through the same `config/admin` pointer the question bank uses (`_mkOwnerUid`).
+- **`_mkBankCol` is deliberately NOT `_mkCol`.** That name already belongs to this app's own
+  `users/{uid}/mistakes` log — a student's personal record of their own wrong answers — and the
+  two collections are different things: one is private and per student, the other is the
+  teacher's vetted, anonymised bank. Nothing here reads or writes the older one.
+- **The admin page is admin-only in two places**: the nav item carries `admin-only`, `mistakebank`
+  is not on `EMPLOYEE_PAGES`, and `navigateTo` rewrites it — hiding a nav item is never the lock.
+  `mkHarvest`, `mkAnalyseAll` and `mkGenerateRun` refuse a non-author in the handler, and a
+  write from anyone else is refused by the rule itself and named in the toast.
+- Run **`node tools/mistake-bank-tests.mjs`** after touching any of it.
+
+## 🐾 The question on a mistake card is the question out of the BANK (v1.395.0)
+
+`MK_Q_BLOCKS` / `_mkQuestionBlocksHtml` / **`_mkQuestionHtml`** (beside
+`_mkQuestionText`, search `THE QUESTION ON A CARD IS THE QUESTION OUT OF THE
+BANK`), the one call in `_mkRenderSession` and the one in `_mkCardHtml`, and the
+`.mk-qbody` / `.mk-qb-*` / `.mk-qtoggle` rules in `index.html`.
+
+A card used to print `e.question` — and `e.question` is the wording **flattened
+for a PROMPT**: `_gradingQuestionSource` joins the stem, each lettered statement
+and each option with newlines, and `_mkClip` then folds every one of those into
+a space. Right for the model that cleaned the answer up, unreadable for the
+child being asked to study it: *"…The diagram shows a plant. [Question figure 1]
+What will be the effect(s)… A: fruit becomes larger B: flowers die C: plant dies
+Option 1: A only Option 2: B only…"* arrives as one grey paragraph, with the
+figure dumped in a row underneath wherever it happened to fall. The card draws
+the question out of the bank instead — wording as wording, the figure where the
+question prints it, the options as a numbered list.
+
+- **IT IS A RENDER, NOT A RE-STORE.** Nothing about an entry changes, so every
+  card already in the bank reads properly from the next paint — and the content
+  key the feed history is built on (`_mkFeedQuestion`, over `e.question`) does
+  not move. Rewrite the stored wording instead and every mistake a child has
+  already been served is served to them again, which is the one cost of a
+  tidier-looking fix that nothing on any screen would report.
+- **`MK_Q_BLOCKS` IS AN ALLOWLIST, and that is the answer-leak guard.** It names
+  the block types a question ASKS with — text, part, image, table, mcq,
+  fillblank — and `answer`, `plainanswer`, `answerLine`, `answerKey`,
+  `explanation` and `workingSpace`'s own model answer are not drawn at all. A
+  skip-list would let a block type added next month through by default, and this
+  card is read BEFORE the child rewrites the answer: anything that leaks here
+  hands them the very thing they are being asked to write.
+- **A FILL-IN-THE-BLANK IS DRAWN BLANK.** `_fbReadonlyHtml` — what
+  `renderImportedBlockStudent` uses — is a REVIEW rendering with each answer
+  sitting in its slot, which is exactly why the block renderer every other
+  student surface shares is the one thing that cannot be reused here.
+  `renderQuestionBodyPreviewHtml` is the teacher's preview and prints the model
+  answer outright, so it cannot either.
+- **AN MCQ IS A READ-ONLY NUMBERED LIST.** No radios — the card is about
+  somebody else's answer, not a question to answer here — and the correct option
+  is never marked. The numbers are the app's own `i + 1`, so "(3) A and B only"
+  in the answer beside it names an option the child can see.
+- **NO −/+ PICTURE PILL.** `pvsBarHtml` writes a size straight back to the
+  question bank; what is being vetted on this card is the LESSON, and a control
+  that quietly edits the question underneath it is a surprise on a page nobody
+  opened to author with.
+- **ONE RENDERER, BOTH CARDS.** The teacher's vetting card opens on the same
+  drawing the class reads, so an entry cannot be approved against a different
+  rendering from the one it is served in. The teacher's card keeps the clipped
+  flat text as its COLLAPSED summary line — that is a one-line label in a list
+  of forty, not the question.
+- **A QUESTION THAT HAS LEFT THE BANK STILL READS**, on the wording and pictures
+  the entry carries — and so does a failure of any kind, because presentation
+  may never take a practice card down (`_mkFigure`'s rule). The harness pins the
+  drawn path, so a real breakage is loud there rather than a card that silently
+  goes back to being a paragraph.
+- Run **`node tools/mistake-bank-tests.mjs`** after touching any of it.
+
+## 🐾 Which PART of the question the mistake is in (v1.396.0)
+
+`MK_PART_RE` / `_mkPartKey` / `_mkPartWhat` / **`_mkPartNote`** (beside
+`MK_Q_BLOCKS` — search `WHICH PART OF THE QUESTION THE MISTAKE IS IN`), the
+`opts.part` marking inside `_mkQuestionBlocksHtml`, the `.mk-where` line on the
+practice card, the chip on the teacher's card, the `THE PART BEING ANSWERED`
+line in `mkCheckRewrite`'s prompt — and the half that carries it there:
+**`_partLabelFor`** (beside `_attemptAnswers`), the `label` on
+`fcNoteMistakes`'s parts, `rec.part` on the child's own log, and
+`_mkOwnEntries`' read of it. Plus `.mk-qb-this` / `.mk-qb-here` / `.mk-where`
+in `index.html`.
+
+v1.395.0 drew the WHOLE question on a card — every part, every option — and
+nothing on it said which of them the answer beside it was answering. On a
+question with (a), (b) and (c), or with a multiple choice and a written part,
+that is the one thing a child needs before the lesson means anything.
+
+- **`e.part` IS THE ITEM'S OWN LABEL, as the marking wrote it** — `"(b)"`,
+  `"(b) Claim"`, `"(b)(i) Answer"`, `"Blank 2"`, or the bare `"Answer"` a
+  question with no lettered parts gets. It is read TWO ways and they are kept
+  apart: **`_mkPartKey`** is the PART, in the key `qPartMap` files blocks under,
+  so the drawn question can MARK the blocks this lesson is about;
+  **`_mkPartNote`** is the sentence a child READS, and it is the ONE wording —
+  the teacher's card, the practice card and the marker of the rewrite all print
+  it, so they can never disagree about which part this is.
+- **IT GOES THROUGH THE APP'S OWN PART VOCABULARY** (`qPartLetterNormalize` /
+  `qSubNormalize` / `qPartKey` / `qPartKeyIn`), never a second reading of what a
+  part is. A label parsed privately would file the lesson under a letter the
+  question does not have — and **`i` is not a part letter here**
+  (`QPART_ASSIGN` skips it, because it is the roman `(i)`), which is exactly the
+  kind of rule a private regex forgets.
+- **A KEY THAT NAMES NOTHING IN THE QUESTION MARKS NOTHING.** A question
+  re-lettered since the mistake was filed would otherwise have the card claim a
+  part it cannot point at, which is worse than not pointing.
+- **The marked blocks are ACCENTED, never dimmed**, and the "this part" flag is
+  on the FIRST block of the run only: every other part is context the child
+  still needs to read, and a flag repeated down three blocks stops reading as a
+  pointer.
+- **A BARE "Answer" IS WORDED RATHER THAN DROPPED** — *"the written answer"*.
+  That is the reported card: a question whose choices are drawn under its
+  wording, answered in writing, where naming which of the two was the whole of
+  what was missing. Printing the raw `"Answer"` instead would put *"part
+  Answer"* over every single-part question, which is why the old header suffix
+  said nothing worth reading.
+- **NOTHING RECORDED SAYS NOTHING.** A generated example is written against the
+  whole question, and an entry filed before the part travelled has none to show.
+  A guessed part is a lesson pointing at the wrong sub-question, so nothing here
+  guesses — `e.expected` could be matched against the question's per-part model
+  answers and deliberately is not.
+- **THE PART TRAVELS, AND `_partLabelFor` IS THE ONE DERIVATION.** It is read
+  off the KEY, the rule v1.394.0 already set for the habit itself: a further
+  argument threaded through `_setPartResult`'s six call sites would be six
+  chances to forget one. The attempt row, the child's own mistake log and —
+  through both — the 🐾 Mistake Bank now read that same function.
+  **`_mkOwnEntries` hard-coded `part: ''`**, so a child studying their OWN
+  mistakes could never be told which part it was; `fcNoteMistakes` writes
+  `rec.part` when a label was recorded and leaves it **ABSENT** otherwise, never
+  an empty string a later reader could take for a part.
+- **The marker of a rewrite is told the part.** Handed the whole question and
+  ONE part's model answer, it otherwise expects the whole question answered and
+  marks a correct rewrite down for being short.
+- Run **`node tools/mistake-bank-tests.mjs`** after touching any of it.
+
+## 🗑 The teacher reads the mistake bank and clears it (v1.396.0)
+
+`MK_STATUS_ALL` / `_mkPicked` / `_mkHaystack` / **`_mkVisible`** /
+`_mkPruneSelection` / `mkTogglePick` / `mkPickAll` / **`_mkDeleteMany`** /
+`mkDeleteSelected` / `mkDeleteAllShown` (search `READING THE BANK AND CLEARING
+IT`), the 📚 **All** chip and the `#mkBulk` bar in `mkRender`, the tick on every
+card, and `.mk-pick` / `.mk-bulk` / `.mk-card.picked` in `index.html`.
+
+Every entry has always had its own 🗑 and the bank still filled up. A bad
+harvest is forty entries, forty confirms is not something anybody works
+through, and the three status chips meant a teacher looking for ONE mistake had
+to guess which pile it was in first.
+
+- **"ALL" MEANS EVERY CARD THE TEACHER CAN SEE.** `_mkVisible` is the ONE place
+  that set is worked out — the status chip, the animal chip and the search box
+  decide it — and the cards, the tick-all box, 🗑 Delete selected and 🗑 Delete
+  all shown all read it. Deleting entries hidden behind a filter is the one
+  outcome nobody could have predicted from the button they pressed, so the
+  confirm **says how many are going and how many are spared**. It is
+  `_vetDeleteMany`'s rule on the vetting list, stated once more here.
+- **📚 All is a fourth chip and NOT a status.** `MK_STATUSES` still holds the
+  three real ones, so nothing that writes a status can write `'all'`.
+- **THE DELETES ARE AWAITED, ONE DOCUMENT AT A TIME.** A batch has to be able to
+  report that four of forty would not go, and an entry leaves `_mk.bank` only
+  once its document really went — a page that has dropped an entry the database
+  still holds looks perfectly right until the next sign-in.
+- **THE SELECTION IS PRUNED ON EVERY RENDER**, in the renderer rather than in
+  each path that can remove an entry, which is what covers a path added later.
+  "3 selected" outliving the cards it counted is how the wrong entry gets
+  deleted. The ticks live in a `Set` of **IDS**, never a flag on an entry: those
+  objects are replaced wholesale by every reload, write and harvest.
+- **`.mk-pick` must set `appearance: auto`** — Tailwind's preflight sets it to
+  `none`, which leaves an invisible white square exactly where the control the
+  teacher is looking for should be. The usual trap.
+- **IT IS THE ADMIN'S, CHECKED IN THE HANDLER.** A hidden button is never the
+  lock, and this one both reads the bank and deletes from it.
+- **THE SEARCH REALLY SEARCHES** (`_mkHaystack`): the question wording, the
+  correct answer, the part and the animal's own name, not just the title. A
+  teacher cannot delete what they cannot find.
+- **THE CHILD'S OWN LOG IS NOT TOUCHED.** `users/{uid}/mistakes` is their
+  private record of their own wrong answers; this clears the class BANK, which
+  is the teacher's.
+- Run **`node tools/mistake-bank-tests.mjs`** after touching any of it.
+
+## 🐾 A mistake is an OPEN-ENDED mistake — the ✨ generator's own gate (v1.397.0)
+
+`_mkOpenAnswer` / `_mkModelAnswer`'s `openOnly` flag / `MK_GEN_OPEN_RULE` /
+**`_mkMcqOnlyEntry`** (search `A MISTAKE IS AN OPEN-ENDED MISTAKE`), the pool
+filter in `mkGenerateRun`, the re-check at the top of `mkGenerateOne`, the
+fourth gate in `_mkVisibleToStudent`, the ⚠ badge in `_mkCardHtml` and
+`.mk-badge.mcq` in `index.html`.
+
+The bank has been open-ended only since v1.394.0 — the sidekick, the analysis
+card, `_partMistakeOf`, `fcNoteMistakes`, `_mkOwnEntries` and
+`_mkCandidatesFrom` all stand down on a multiple choice, because "(3)" shows no
+missed comparison and no vague wording. **✨ Write wrong answers was the one
+door with no gate**, so it invented prose "mistakes" for questions whose whole
+answer is a tick in a box: a card headed *Functions of Nose and Lungs*, a habit
+that fits, and a lesson about a mistake nobody could have made.
+
+- **`_mkOpenAnswer(q)` IS THE ONE PREDICATE, and it is `_mkModelAnswer` with a
+  flag rather than a second walk over the blocks.** Two walkers drift into two
+  different answers to *what is this question's answer*, and the drift is
+  invisible — the generator would be reading one and the prompt carrying the
+  other. `openOnly` skips the `mcq` branch and nothing else, so **every OTHER
+  caller of `_mkModelAnswer` is byte-for-byte unchanged** and still names the
+  option: `_mkMarkedEntry` and `mkAnalyseCandidate` are filing a REAL wrong
+  answer to a question that was really asked, and the option is what the
+  correct answer was.
+- **IT IS GATED TWICE, and the second one is not redundant.** `mkGenerateRun`
+  filters the pool, and `mkGenerateOne` refuses again at the top: a caller
+  added later is not bound by a filter it never saw, and a hidden button is
+  never the lock — the same rule every admin door in this file follows.
+- **THE GENERATOR IS HANDED THE WRITTEN ANSWER, and `MK_GEN_OPEN_RULE` on top.**
+  Being prompted with `(2) The tiny hairs…` is precisely what put the option
+  number into the reported card, so the gate keeps the wrong QUESTION out and
+  only the rule keeps the wrong SHAPE of answer out of a right one — a model
+  told to imitate a pupil will open with "(2)" on a written question if it has
+  just been shown one. **There is deliberately NO text-stripper** for a leading
+  option marker: "(3) times the length" is a legitimate answer, and a cleaner
+  that mangles one is worse than a prompt that is obeyed nearly always.
+- **THE BANK ALREADY HOLDS THOSE ENTRIES**, and nobody is going to open them one
+  at a time — so `_mkMcqOnlyEntry` is a fourth gate in `_mkVisibleToStudent`
+  (the class is never served one, whatever it was approved as) and a ⚠ badge on
+  the teacher's card. **ONE predicate for both**: two tests drift into a card
+  flagged on one screen and quizzed on the next.
+- **It asks for the MCQ EXPLICITLY rather than only for the absence of a written
+  answer.** A question with no answer blocks at all is a different fault with
+  its own warning, and this badge has to mean what it says.
+- **A question with BOTH an option list and a written part is NEVER flagged**,
+  because `_mkOpenAnswer` reads its written half — which is also what makes the
+  generator's pool include it.
+- **A question that has LEFT the bank keeps its entry**, exactly as the three
+  serving gates above it already have it: the work was still done and there is
+  nothing left to judge it by. The asymmetry is deliberate, and it is why the
+  predicate answers `false` on a missing question rather than refusing.
+- **An entry served to nobody with nothing on screen to say why reads as one
+  nobody has got round to**, which is why the badge exists at all — it names
+  the reason and says to delete it.
+- Run **`node tools/mistake-bank-tests.mjs`** after touching any of it.
+
+## 🐾 The mistake analysis that FOLLOWS a sidekick (v1.393.0)
+
+`science-mistakes.js` (`prepareMistakeAnalysis` / `mountMistakeAnalysis` /
+`resetMistakeAnalysis`), `science-mistake-art.js` (`MISTAKE_ANIMAL_ART_IDS` /
+`renderMistakeAnimalAvatar` / `mistakeAnimalAccent`), the exported
+`scienceCoachMotion` in `science-coaches.js`, and in `app.js` —
+`_mistakeAnalysisFor` / `_mcqChoiceLabel` (beside `_showScienceCoachFeedback`,
+search `const _scienceCoachEpochs`), `MISTAKE_ANIMAL_RULE` spliced into all
+THREE marking prompts with the `mistake` / `mistakeWhy` reply fields, and
+`_mkFigure` / `_mkMotion` on the student's 🐾 Learn-from-mistakes page — plus
+the `.sc-mistake-*` / `.sc-question*` / `.mk-figure*` CSS in `index.html`.
+
+A Science Sidekick (Evidence Ellen, Context Connie…) says what a stronger
+answer needs NEXT. Directly under it, on a wrong or partly-right answer, the
+**🐾 Mistake analysis** card now says which Science Sidekick's skill the
+answer was missing — Specific Sherry's precision, Complete Cody's finish —
+drawn as the SAME kind of animated figure, standing beside the ACTUAL question
+(its title, its wording, its part label, its pictures) and what the student
+wrote, with the animal's lesson under it. The same figures animate on each
+animal's card of the student's Learn-from-mistakes page.
+
+- **IT RIDES THE SAME MARKING CALL, never a second one.** `MISTAKE_ANIMAL_RULE`
+  is appended to the whole-question, per-part and annotation prompts and the
+  reply carries `mistake` / `mistakeWhy` beside the coach issues it already
+  returned. No extra cost, and no way for the habit and the verdict to come
+  from two different readings. `_mistakeAnalysisFor` resolves the model's word
+  through `mistakeAnimalNormalize` → `mistakeAnimal`, and **"none" is a real
+  answer**: an unknown, invented or unsure animal draws NO card rather than the
+  nearest one — a wrong label teaches a wrong lesson with a straight face.
+- **IT FOLLOWS THE SIDEKICK, and the sidekick's root is the anchor.**
+  `_showScienceCoachFeedback` mounts the coach first and hands its root to
+  `mountMistakeAnalysis(host, coachRoot || host, analysis)`, which inserts
+  `afterend`. With no coach (a partial answer with no issue the coaches speak
+  to) it follows the feedback line itself. The browser harness pins the ORDER
+  by measuring the two boxes — a card that mounted above the coach would look
+  perfectly fine and be the wrong way round.
+- **THE ACTUAL QUESTION TRAVELS WITH IT.** `_mistakeAnalysisFor(result,
+  context, q)` reads the question's own title, the part's wording, its label
+  and up to two of its pictures, and what the student wrote — an MCQ pick is
+  spelled out through `_mcqChoiceLabel` rather than shown as a bare letter.
+  A question with no wording says so on the card rather than drawing an empty
+  box. Every string is clipped (`LIMITS`) and escaped, and a picture is drawn
+  only from a scheme a question's own figure can come from (`safeUrl`): a
+  classmate's words and a model's sentence are DATA, and the harness pins that
+  nothing in them runs.
+- **`prepareMistakeAnalysis` IS THE ONE DOOR and it REFUSES rather than
+  guesses**: a correct or blank verdict, an animal not in
+  `MISTAKE_ANIMAL_ART_IDS`, a taxonomy entry missing its words, or a
+  non-object all come back `null` and nothing is mounted. It takes the
+  TAXONOMY entry, never the model's string, so the words on the card are the
+  centre's own.
+- **ONE MOTION PREFERENCE FOR BOTH CARDS.** `scienceCoachMotion` is exported
+  from `science-coaches.js` and the mistake card imports it rather than keeping
+  a second flag: both wear `data-sc-mount`, so *Pause motion* on either pauses
+  both, `prefers-reduced-motion` stills both, and both are `display: none` on
+  paper. Two flags would disagree the first time one was pressed.
+- **EVERY RESET SWEEPS BOTH.** `_resetOpenScienceCoaches` and
+  `_captureScienceCoachTarget` call `resetMistakeAnalysis` beside
+  `resetScienceCoaches`, each in its own try/catch: a re-check clears the old
+  analysis before the new mark lands, and a reset of the question takes both
+  cards with it. A stale card under a fresh mark is a lesson about the wrong
+  answer.
+- **A FAILURE NEVER BLOCKS MARKING.** Both mounts are wrapped: a card that
+  could not be drawn costs the student a card, not their mark.
+- **`science-mistake-art.js` is its OWN sheet of nine**, one avatar per animal
+  id, each self-contained (no shared `id`, no external reference) so nine on the
+  Learn-from-mistakes page do not cross-reference each other — the same rule
+  the Sidekick art and Chung GPT's face follow. `mistakeAnimalAccent` is the
+  ONE place an animal's accent colour comes from, so the card and the roster
+  agree.
+- **The `MISTAKE_ANIMALS` block is untouched.** It is shared byte for byte with
+  `polymathlc/scan` and `polymathlc/anskey`; this feature reads it and adds
+  nothing to it, so the three apps still agree.
+- Run **`node --test tools/science-coach-core-tests.mjs
+  tools/science-coach-integration-tests.mjs tools/science-mistake-tests.mjs`**,
+  `node tools/mistake-bank-tests.mjs`, `node tools/teaching-notes-tests.mjs`
+  and the Playwright harness `tools/science-coach-browser-tests.mjs` (locally:
+  `COACH_PLAYWRIGHT_MODULE=/opt/node22/lib/node_modules/playwright/index.mjs node
+  tools/science-coach-browser-tests.mjs`; it runs in the `science-coaches.yml`
+  workflow) after touching any of it.
+
+## 🐾 A mistake STAYS: the marker's habit is filed, and the analysis is open-ended only (v1.394.0)
+
+`_partMistakeOf` (beside `_setPartResult`, which now hands it the KEY), the
+`mistake` / `mistakeWhy` fields on `_attemptAnswers` rows and on the student's
+own `fcNoteMistakes` records, `MK_FILED_MARKING` / `MK_FILED_AI` / `filedBy`,
+**`_mkMarkedEntry`** / `_mkFileMarked` / `_mkHarvestNote`, the auto harvest in
+`mkRender` (`_mk.autoRan`), `MK_OWN_SHOWN` / **`_mkOwnEntries`** /
+`_mkStudentPool(…, 'mine')` / `_mkOwnSectionHtml` / `mkStudyOwn`,
+`_mkNormaliseEntry` in both loads, `_coachKindIsMcq` beside
+`_showScienceCoachFeedback`, the `kind === 'open'` branch of `markQuestionPart`'s
+prompt, the `.mk-own*` CSS, and the nine-Sidekick `MISTAKE_ANIMALS` block
+(shared byte for byte with `polymathlc/scan` v1.8.0 and `polymathlc/anskey`
+v1.94.0).
+
+Three things a wrong answer used to lose the moment its card was swept.
+
+- **THE HABIT RIDES `_openPartResults`, NOT THE CARD.** The marking reply
+  named the animal; until now that name lived only on the card under the
+  sidekick, so it reached neither the attempt row nor the child's own log nor
+  the 🐾 Mistake Bank, and the teacher's 🔎 harvest paid a SECOND AI call to
+  work out a habit the marker had already named. `_partMistakeOf` reads it
+  ONCE at `_setPartResult`, through the taxonomy, never on a correct part —
+  and it rides the same store into the attempt row (`_attemptAnswers`) and
+  the child's own log (`fcNoteMistakes`) that the score and the feedback
+  already ride. Absent when nothing was named, so old rows and new look alike.
+- **THE BANK FILLS ITSELF FROM THE MARKING, PENDING, WITH NO CALL.** A
+  candidate carrying a habit is filed by `_mkMarkedEntry` (through the ONE
+  builder, `_mkEntryFromAnalysis`, so it strips a child's identity exactly as
+  the AI path does) with `filedBy: 'marking'`; the rest wait for ✨ as they
+  always did. `mkRender` runs `mkHarvest({ auto: true })` once a sitting, so
+  the teacher opens the page to a Pending list rather than a button — and
+  `_mkHarvestNote` SAYS what was filed, because a costly, invisible thing
+  happening by itself is a thing nobody trusts. **Still pending, still
+  vetted**: nothing here reaches a student unapproved.
+- **THE CHILD'S OWN MISTAKES ARE THEIR OWN PAGE'S FIRST CARD.** `_mkOwnEntries`
+  reads `users/{uid}/mistakes` — the private log, never the class bank —
+  through the same three serving gates the class pool reads, so a held-back or
+  off-level question is not studied through a wrong answer to it either.
+  `_mkStudentPool(…, 'mine')` is that list and nothing else, and it skips the
+  feed history on purpose: a child revising their own mistake is meant to meet
+  it again. The card says *You wrote*, never *a student wrote*.
+- **THE SIDEKICK AND THE ANALYSIS ARE OPEN-ENDED ONLY.** A multiple-choice
+  part is a tick or a cross — "(3)" shows no missed comparison and no vague
+  wording — so `_coachKindIsMcq` stands both cards down in
+  `_showScienceCoachFeedback` (and sweeps any earlier card), `_mistakeAnalysisFor`
+  refuses an mcq context on its own, `_partMistakeOf` refuses an `mcq:` key
+  whatever the model returned, `fcNoteMistakes` and `_mkOwnEntries` skip an mcq
+  record, `_mkCandidatesFrom` skips a *Multiple choice* row, and the per-part
+  prompt asks for coach issues and a habit on an OPEN part only (the batch
+  prompt says in as many words that an MCQ item carries neither). A part with
+  no kind is treated as open — the two local marks pass none.
+- **THE TAXONOMY IS THE SIDEKICKS' OWN.** The mistake types are the nine
+  Science Sidekicks' skills, missing, not a second cast of ten animals: the
+  coach that says what the answer needs next and the figure that names the
+  habit are ONE figure, so `science-mistake-art.js` draws the Sidekick avatar
+  and the roster on the card is the nine. Every stored old id is carried
+  across by `MISTAKE_ANIMAL_ALIASES` — nothing already filed under `fox` or
+  `parrot` reads as unknown — and an id that fits nothing is left for the
+  teacher to re-pick rather than guessed.
+- Run **`node tools/mistake-bank-tests.mjs`**,
+  `node --test tools/science-coach-core-tests.mjs tools/science-coach-integration-tests.mjs tools/science-mistake-tests.mjs`,
+  `node tools/teaching-notes-tests.mjs`, `node tools/scheduled-release-tests.mjs`,
+  `node tools/usage-tracker-tests.mjs` and the Playwright harness after touching
+  any of it.
+
+## 🐾 ONE PART'S ANSWER, and not the rest of the question (v1.398.0)
+
+`MK_RUN_MIN` / `MK_RUN_RE` / `_mkAnswerRuns` / **`_mkAnswerFor`** /
+`_mkPartNamed` / `_mkSpansParts` / **`_mkShownAnswer`** (beside the part
+vocabulary — search `ONE PART'S ANSWER, AND NOT THE REST OF THE QUESTION`),
+the third argument to **`_mkModelAnswer(q, openOnly, part)`**, the `cut` inside
+**`_mkEntryFromAnalysis`**, the cut in `_mkCandidatesFrom`, the stand-down in
+`_mkMarkedEntry`, the `"part"` field `_mkAnalysePrompt` asks for, the read of
+it in `mkAnalyseCandidate`, the cut in `_mkOwnEntries`, and `.mk-cut` in
+`index.html`.
+
+v1.396.0 put WHICH part on the card. What still reached the class beside it was
+the **whole question's ANSWER**: a food-web card whose lesson was entirely
+about (b) opened — in the pupil's box and in the correct answer alike — with a
+paragraph of part (a), which was right, which the lesson never mentions, and
+which overflowed the scroll box before the child reached the part the mistake
+is in. Asked for in the teacher's own words: a mistake is written for ONE part
+of the question, and a part that is not relevant is **IGNORED — not
+shortened**.
+
+- **`_mkAnswerFor` IS THE ONE CUTTER**, and `_mkAnswerRuns` cuts on the markers
+  the ANSWER ITSELF carries, through the app's own part vocabulary
+  (`qPartLetterNormalize` / `qSubNormalize` / `qPartKey` / `qPartKeyIn`) and
+  never a second reading of what a part is. It is v1.396.0's rule applied to
+  the answer instead of to the label.
+- **IT REFUSES FAR MORE OFTEN THAN IT CUTS, and that is the whole safety
+  story** — an answer cut in the wrong place is a lesson with half its science
+  missing, and it reads perfectly. Fewer than `MK_RUN_MIN` markers is prose; a
+  letter that does not follow the one before it is prose; an **UPPERCASE**
+  letter is prose (`E. coli`, and the organism label "E." that opens the very
+  answer this was reported for); a bare `b)` needs white space behind it, where
+  `(b)` does not. **A KEY THAT NAMES NOTHING IN THE ANSWER CUTS NOTHING** — the
+  rule `_mkQuestionBlocksHtml` already follows for the drawn question.
+- **IT IS IDEMPOTENT.** One run has one marker, which is prose, so a text
+  already cut comes back unchanged — which is what lets the ONE builder store
+  it cut AND the cards cut what was filed before this shipped.
+- **THE RUN KEEPS ITS OWN LABEL.** "(b) The population of C will increase" is
+  what the paper printed; stripped to "The population…" the child has to be
+  told which part in a second sentence.
+- **`_mkModelAnswer` ANSWERS A PART TWO WAYS, because a paper answers its parts
+  two ways**: a question whose parts each carry their own answer block is read
+  off those blocks, and one that answers every part in a single box is cut by
+  the markers typed into it. Asking the BLOCKS first and falling back is what
+  keeps both honest — a part-scoped walk that found nothing would otherwise
+  hand back an empty answer for a question that plainly has one. With no part
+  it is byte-for-byte what it always was, so **`_mkOpenAnswer` did not move**.
+- **`_mkEntryFromAnalysis` IS WHERE THE ANSWER IS STORED CUT**, because it is
+  the one door every write path goes through — the marking's own filing,
+  ✨ Find wrong answers and ✨ Write wrong answers alike. `_mkCandidatesFrom`
+  cuts as well, and that is not redundancy: it is what the ✨ PROMPT is handed,
+  and a model given both parts writes a correction covering both.
+- **A MARKED CANDIDATE THE MARKING CANNOT PLACE IS LEFT FOR ✨**
+  (`_mkSpansParts` → `_mkMarkedEntry` returns null). There is no AI call on
+  that path, so there is nothing there that can say which part the lesson is
+  in, and a guess is a lesson pointing at the wrong sub-question. It is the
+  door that path already uses for a candidate whose habit the marker did not
+  name — a second reading spent only where the first one said nothing.
+- **THE ANALYSIS IS ASKED WHICH PART, AND ONLY WHEN IT HAS TO.** When the
+  marking's own label named one, everything above has already been cut to it
+  and the prompt is byte-for-byte what it always was. `_mkPartNamed` is
+  deliberately looser than `_mkPartKey` — that one reads a LABEL the marking
+  wrote and can insist on the marker shape; a model asked for a letter answers
+  with a letter — and anything that is not a part comes back `''`.
+- **THE PART GOES INTO `part`, NEVER INTO A FIELD OF ITS OWN.** Every reader
+  this app already has — the note the class reads, the marked blocks in the
+  drawn question, the rewrite marker's prompt and the ONE builder's own cut —
+  picks it up with nothing new to be taught.
+- **`_mkShownAnswer` IS THE RENDER SIDE**, so a bank that is already full
+  improves on the next paint rather than being rewritten. It is a RENDER: the
+  feed's content key is over `e.question`, which does not move.
+- **THE TEACHER VETS THE ANSWER THE CLASS IS SERVED**, the rule
+  `_mkQuestionHtml` already carries — so the card's boxes hold the CUT answer
+  and `.mk-cut` says so under them. Saving the card makes it the record; a cut
+  that happened silently would be a rewrite nobody asked for.
+- Run **`node tools/mistake-bank-tests.mjs`** after touching any of it.
+
+## 🛠 The worksheet builder's controls are on TOP (v1.401.0)
+
+`wsSyncToolsTop` / `_wsToolsInit` (search `THE WORKSHEET BUILDER'S CONTROLS SIT
+ON TOP`), the `#page-worksheet .ws-actions-bar` rules in `index.html`, and the
+order of the blocks inside `#page-worksheet`'s `.page-body`.
+
+Preview / Save Worksheet / Print / Generate PDF / Practice / Fill in the blanks
+sat BELOW `#wsQuestionGrid`, so on a bank of a hundred questions the only way to
+reach them was to scroll past every one. They are above the grid now — actions,
+then the print Extras, then Select All, then the grid — and the actions bar
+**sticks** under the page header while the list scrolls, which is the other half
+of the fix: on top is worth little if ticking a few questions pushes it away
+again.
+
+- **THE OFFSET IS MEASURED, NEVER WRITTEN PER BREAKPOINT.** `.page-header` is
+  `position: sticky; z-index: 50` and two lines of text tall, so a bar sticking
+  at `top: 0` slides underneath it and is invisible exactly when it is wanted.
+  Its height moves with the font, the wrap and the viewport, so a hard-coded
+  number is right at one size and silently wrong at the rest. A
+  **ResizeObserver on the header** fires on first layout and on every change, so
+  there is no navigation hook to forget when a page is added.
+- **THE RULE IS SCOPED TO `#page-worksheet`.** `.ws-question-grid` is reused by
+  the community quest picker (`#commQuestPickList`), which scrolls inside itself
+  and has no room for a sticky bar. Making the bare class sticky would put one
+  there.
+- **IT BLEEDS INTO `.page-body`'s SIDE PADDING** (`--ws-gutter`, tracking that
+  padding at each breakpoint). Without it the question cards scroll visibly
+  through the 36px gutters beside an opaque bar, which reads as broken.
+- **A PHONE GETS IT STATIC.** Six buttons wrap to three rows under 640px and a
+  sticky bar would eat most of the screen; it is still above the list.
+- **Select All stays beside the grid it governs**, below the controls.
+- Run **`node tools/worksheet-controls-tests.mjs`** after touching any of it.
+
+## 🎨 Colourise a picture from a preview, in the background (v1.402.0)
+
+`imgEnhancePrompt` / `PVC_PAR` / `_pvcJobs` / `pvcState` / `pvcBusy` /
+`_pvcButtonHtml` / `pvcPaint` / **`pvcRun`** / `_pvcPump` / **`_pvcWork`** /
+`_pvcMarkRecheck` / `_pvcSwapImages` / `pvcRevert` (search `COLOURISE A PICTURE
+FROM A PREVIEW`), the `colour` control inside `_pvsButtonsHtml`, the
+`_cqRecheckAt` / `_cqRechecks` half of ✅ Check Questions, and `pvcBusy()` in
+`_xtWorkInFlight`.
+
+Beside the 🔍± size pill, **every preview** now carries a 🎨 that regenerates
+that picture in colour — the same job the block editor's 🎨 does, reached
+without opening the question at all. A teacher reading a sheet fixes the
+pictures on it from where they are reading.
+
+- **`_pvsButtonsHtml` IS THE ONE PLACE IT IS ADDED**, so every surface that
+  already had − / + / Auto got 🎨 without being told: 🖨 Preview Exported, the
+  A4 preview, the 👁 vetting hover, the ⇄ duplicate comparison, the ✎ Questions
+  drawer and both print builders through `pvsDecorateDoc`. A button added per
+  surface is a button that reaches some of them and misses the rest.
+- **IT SURVIVES THE PREVIEW CLOSING.** An image call is 10–25 seconds and a
+  preview is a thing you glance at, so a job needing the preview to stay open
+  would be cancelled by the very next click. **Nothing in `_pvcWork` reads the
+  preview's DOM** — the repaint is best effort, the WRITE is not — and the
+  harness pins that (`getElementById`, `closest`, `wsPreviewOverlay` are all
+  refused inside it).
+- **THE QUESTION IS RE-RESOLVED AFTER THE CALL, never held across it.**
+  `questionBank` is re-read and re-assigned wholesale elsewhere, so an object
+  captured twenty seconds earlier writes into an array nothing renders. The
+  harness pins that the re-resolve comes *after* the image call, or it is not a
+  re-resolve at all.
+- **`imgEnhancePrompt(colour, remark)` IS THE ONE PROMPT**, extracted out of
+  `enhanceBlockImage`. Two copies is one picture coming back two different ways
+  depending on which button was pressed, with nothing on any screen to say
+  which produced what. It goes through `generateCleanEnhancedImage` for the
+  same reason the editor's does: the model's decoder leaves a faint weave on
+  the white it paints, and this picture is going to be printed.
+- **THE ORIGINAL IS KEPT ON THE BLOCK (`preColourUrl`), ONCE.** That is what
+  makes "vet the colourised image" mean anything — without it, rejecting a bad
+  colourisation means finding and re-uploading the scan by hand. Set once, so
+  colourising twice does not lose the scan behind the first attempt. Uploads
+  are content-addressed and nothing here deletes one, so the old URL keeps
+  working, and `collectQuestionData`'s deep clone carries the field through an
+  editor save.
+- **A REFUSED WRITE PUTS THE PICTURE BACK**, in both directions: the colourise
+  restores `block.url`, and a refused **revert** restores `url` **and**
+  `preColourUrl` — restoring only the url would leave the question wearing the
+  colourised picture with nothing left to undo it with.
+- **AND IT GOES TO THE FRONT OF ✅ CHECK QUESTIONS** (`q.recheck`). That queue
+  is newest-first, so without a front of its own a colourised question is
+  buried under every question added since, which is the same as not queueing it
+  at all. `_cqRechecks` is deliberately **not** filtered by
+  `CQ_RECENT_DAYS` — a colourised question from last term is the most urgent
+  thing in the bank — the badge counts rechecks whatever their age, the queue
+  dedupes by id, and `_pvcMarkRecheck` **clears `q.checked`**: what was read
+  was the OLD picture. ✓ **Looks fine** is the ONE act that settles it (and
+  puts it back on a refused save); an ordinary edit does not, because
+  `recheck` is outside `EDITOR_OWNED_QUESTION_FIELDS` — opening a question is
+  not the same as looking at its picture.
+- **The card SAYS why it is at the front** (`_cqRecheckBanner`) and carries
+  ↩ Use the original picture. A colourised question arriving with no
+  explanation reads as the queue having gone wrong.
+- **`pvcBusy()` is in `_xtWorkInFlight`.** A picture being colourised exists
+  only in a model's reply until it is written, so closing the tab mid-call is
+  the one way this loses work.
+- **`pvsDecorateDoc` BINDS BY ACTION, NOT BY POSITION** (`data-pvs-act`). The
+  pill has four controls now; binding by index re-points its neighbours'
+  handlers the day a fifth is added, which is a button that quietly does
+  somebody else's job.
+- **🎨 IS LAST IN THE PILL AND SET APART.** The three controls to its left are
+  instant and free and this one spends an AI call, so it must not be what a
+  thumb lands on while sizing a picture.
+- **Only an author, checked in the HANDLER.** A student's device renders the
+  very same preview.
+- Run **`node tools/preview-picture-size-tests.mjs`** after touching any of it.
+
+## 👁 The hover preview stays open (v1.402.1)
+
+`_ppHoverKey` / `_ppHoverOver` / `PP_HOVER_GRACE_MS` / `_ppHoverHasPointer` /
+the card's own `mouseenter` / `mousemove` / `mouseleave` listeners in
+`ppHoverEl` / the `settled` guard in `ppHoverExpand` (search `hover preview`),
+plus `qbTileHoverCancelPending` and the first two lines of
+`renderQuestionBank`.
+
+*"Sometimes it's unstable and keeps closing the preview window by itself."* It
+was — **four separate causes, all with the same symptom**, and that is what
+made it read as flakiness rather than as a bug anyone could report precisely:
+the card shut at no fixed moment, with nothing on any screen to explain it.
+
+- **A BACKGROUND RE-RENDER WAS CLOSING IT, and this is the big one.**
+  `renderQuestionBank` opened with `qbTileHoverLeave(); ppHoverHide();` — and it
+  runs on plenty of things the teacher never did: the usage backfill finishing,
+  a question synced from another tab (`_xtFlushQuestions`), the auto-tagger, a
+  release sweep. So a card opened after a deliberate 2.5-second rest vanished a
+  second later. **The card is a child of `<body>` holding a rendered COPY of the
+  question — it does not point at the tile at all**, so a rebuilt grid is no
+  reason to close it. What must go is the **pending dwell**, which is aimed at a
+  tile about to be replaced. `qbTileHoverCancelPending` exists to make that
+  split possible, and it must never call `ppHoverHide` / `ppHoverChipLeave`.
+  A card whose question really has left the bank is still closed —
+  `_ppHoverKey` is what lets that be asked.
+- **THE REPLACEMENT TILE RESTARTED THE DWELL.** A re-render swaps the tile under
+  a cursor that never moved, so `qbTileHoverEnter` fires again on the new one.
+  Restarting the 2.5s wait closed the card (the old tile's leave grace was
+  already running) and made the teacher wait again for the card they were
+  reading. `_ppHoverKey === 'bank:' + qid` is the guard; moving to a DIFFERENT
+  tile still starts a fresh dwell.
+- **THE CARD CLOSED ITSELF WHEN IT MOVED.** An expanded card animates its own
+  `top` and `left` over half a second and is re-anchored **again** 420ms later,
+  once its diagram has loaded and it has a real height. So it slides out from
+  under a still cursor, fires `mouseleave` at itself, and the old handler called
+  `ppHoverHide()` **with no grace at all**. It now uses the same
+  `PP_HOVER_GRACE_MS` the chip's leave uses, which the card's `mouseenter`
+  cancels the moment it catches up with the pointer.
+- **…AND THE SECOND RE-ANCHOR MUST NOT MOVE A SETTLED CARD** (`settled` in
+  `ppHoverExpand`). The FIRST expand always places it — a grown card that was
+  never placed hangs off the screen — but a re-expand of an already-expanded
+  card the pointer is inside leaves it exactly where it is.
+- **`_ppHoverOver` IS THE TRUTH, AND THE RECTANGLE IS ONLY THE BACKSTOP.**
+  `_ppHoverLast` was written only by the TILE's `mousemove`, which stops the
+  moment the cursor moves into the card — so the card believed the pointer was
+  still out on the tile. The card now tracks its own pointer. Geometry alone is
+  not enough: while the card is travelling its rectangle is somewhere between
+  where it was and where it is going, and need not contain the pointer the
+  browser still counts as hovering it. Geometry alone is not useless either —
+  it covers a card that has just grown over a cursor which has not moved, where
+  no `mouseenter` fires until the pointer moves again.
+- Every one of these is in the SHARED machinery, so the past-paper chips, the
+  🎯 objective picker and the attach picker are fixed with the bank.
+- Run **`node tools/hover-preview-tests.mjs`** after touching any of it.
+
+## ✨ ▲▼ ✅ The vetting preview does the rest — enhance, reorder, approve (v1.403.0)
+
+`_pvcOneButtonHtml` / `pvcRun(qid, bid, colour)` / `job.colour` and the
+`'enhance'` recheck reason (in the ✨🎨 block, search `REGENERATE A PICTURE
+FROM A PREVIEW`); `pvoWrapOpen` / **`pvoMove`** / `_pvoSyncEditor` /
+`_pvoRerender` / `_pvoTarget` / `pvoKeydown` / `pvoSelect` /
+**`pvoDecorateDoc`** (search `THE ORDER OF A QUESTION'S ELEMENTS`), the
+`blockTags` option on `buildWorksheetHtml` and the `pvoDecorateDoc(doc)` at the
+foot of `_wsPreviewPack`; `pvsFlushSettled` / `_pvsFlushP`;
+**`vetPrintPeekApprove`** / `_vetPrintPeekRefresh` / `_vetPrintPeekRender` and
+the `data-peek-act` foot buttons in the 👁 peek.
+
+The 👁 hover on a vetting card showed the exported sheet and offered two
+things: open it bigger, or leave for the editor. Three of the commonest fixes
+now happen on the sheet itself, and the card is approved from there.
+
+- **✨ BLACK-AND-WHITE ENHANCE SITS BESIDE 🎨 COLOUR, and they are ONE
+  pipeline.** `_pvcButtonHtml` draws the pair, `pvcRun` takes a third argument
+  (`true` is the 🎨 button, anything else the ✨ one), and `_pvcWork` asks
+  `imgEnhancePrompt(job.colour === true, '')` — the same two prompts the block
+  editor's bar sends, in the same order (✨ first, 🎨 last). **ONE JOB PER
+  PICTURE, WHICHEVER BUTTON STARTED IT**: while a picture is being redrawn the
+  button that started it shows ⏳ and the other is disabled, because two models
+  redrawing one picture is two writes racing for one block. The original is
+  kept on `preColourUrl` either way (the field keeps its name — it is what
+  `pvcRevert` and the queue banner already read), and the recheck says which
+  it was (`why: 'enhance'` / `'colour'`) so ✅ Check Questions does not call an
+  enhance a colourisation.
+- **▲▼ MOVES AN ELEMENT, AND `q.blocks` IS THE ORDER.** `pvoMove` swaps two
+  entries of the question's own array — there is no second list, so the sheet,
+  the practice render and the editor all read the new order on their next
+  paint. It rides the SAME dirty map and flush as the picture size
+  (`_pvsMark` → `pvsFlush`): written when the preview closes, or PVS_IDLE_MS
+  after the last press, or on pagehide, through `saveQuestion` /
+  `saveVettingQuestion`. A second flush would be a second thing to forget on a
+  preview's close.
+  - **THE WRAPPER IS `display:contents`** (`pvoWrapOpen`), so it generates NO
+    box: the planner measures exactly the page it measures without it, and the
+    printed sheet — which never asks for `blockTags` — cannot disagree with the
+    preview over a wrapper only the preview carries. The bar is hung on the
+    element's own first box, absolutely positioned, so it adds no height. Only
+    two call sites pass `blockTags` (the A4 preview and the peek) and the
+    harness counts them.
+  - **THE PREVIEW IS REDRAWN FROM THE QUESTION after a move**, never shuffled
+    in the DOM: the packer decided the page breaks from the old order. The peek
+    rewrites its frame (`_vetPrintPeekRefresh`, same frame, scroll kept, serial
+    bumped so a late callback from the previous render is dropped); the A4
+    preview re-plans.
+  - **↑ / ↓ MOVE THE SELECTED (or hovered) ELEMENT, only while it is on a
+    screen** (`_pvoTarget`). A selection made in a preview closed an hour ago
+    must not move a block from the arrow keys somebody presses to scroll the
+    bank; a press that moved nothing (the top element, ↑) leaves the page free
+    to scroll; a key pressed in a text field is typing.
+  - **THE EDITOR FOLLOWS ONLY WHEN IT HOLDS THIS QUESTION AND ✏️ EDITING MODE
+    IS OFF** (`_pvoSyncEditor`). Duplicated questions share block ids, so a
+    match on the block id alone reorders a different question; in editing mode
+    the global `blocks` is the WHOLE PAPER.
+- **✅ ADD TO QUESTION BANK IS THE CARD'S OWN APPROVE**, reached from the
+  peek: `approveVetting`, the same status stamp, bank write and vetting delete.
+  **THE ORDER IS THE WHOLE FUNCTION.** The peek's own edits sit in `_pvsDirty`
+  waiting for the close to flush them through `saveVettingQuestion`, and the
+  approve deletes the vetting document — a flush landing after that delete puts
+  the document straight back, a question then in the bank AND in vetting. So
+  the question's dirty entry is dropped (the approve's `saveQuestion` writes the
+  whole question, edits included), a flush already in flight is WAITED for
+  (`pvsFlushSettled`), and only then is the card approved. Vetting only: a 🗂️
+  Custom Paper question reaches the bank on Send, held back, never one at a
+  time, so its peek draws no such button and the handler refuses the scope.
+- **THE FOOT IS BOUND BY ACTION** (`data-peek-act`), never by position — a
+  vetting question's peek has one more button than a paper's, and an index
+  re-points its neighbours the day one is added.
+- Run **`node tools/preview-picture-size-tests.mjs`** and
+  **`node tools/vetting-export-hover-tests.mjs`** after touching any of it.
+
+## 🗑 An element can be taken OFF a question, from a preview (v1.407.0)
+
+`PVO_UNDO_MAX` / `_pvoUndo` / **`pvoRemove`** / `_pvoForgetKeys` / **`pvoUndo`** /
+`_pvoSyncEditorRemove` / `_pvoSyncEditorRestore` / `_pvoCanUndo` /
+`_pvoQuestionShown`, the `del` / `undo` buttons `pvoDecorateDoc` hangs on every
+▲▼ bar, the `Delete` and `Ctrl/⌘+Z` branches of `pvoKeydown`, and the
+`.pvo-del` / `.pvo-undo` rules in `PVS_CSS`.
+
+▲▼ (v1.403.0) let a teacher MOVE an element of a question from the exported
+preview. The next commonest structural fix is to LOSE one — a stray picture the
+reader cropped twice, a second copy of the options, an empty answer box the
+model invented — and that still meant ✏️ Edit: open the editor, find the block,
+🗑, Save, find the way back. Every preview bar now carries a 🗑, and the selected
+element goes with the Delete key.
+
+- **IT IS THE SAME SPLICE `removeBlock` MAKES, on `q.blocks`**, riding the SAME
+  dirty map and flush as a move and a picture size (`_pvsMark` → `pvsFlush`):
+  written when the preview closes, or PVS_IDLE_MS after the last press, or on
+  pagehide, through `saveQuestion` / `saveVettingQuestion`. Nothing here writes
+  on the press, and the harness pins that.
+- **A QUESTION MAY NEVER BE EMPTIED.** `pvoRemove` refuses the last block, in
+  words, and the bar draws that 🗑 disabled — the rule `emMayRemove` carries in
+  ✏️ editing mode. A question with no blocks renders as nothing, prints as a
+  numbered gap and cannot be answered.
+- **THE KEYWORDS AND BLANKS GO WITH IT** (`_pvoForgetKeys`). `q.answerKeywords`
+  is keyed `<bid>` / `<bid>_<field>` and a CER block keeps three keys; an
+  orphan left behind comes back on a later block given the same id, which is
+  why `kwForgetBlock` exists in the editor. The match is `k === bid` or
+  `k.startsWith(bid + '_')` — `p10` is not `p1_`.
+- **IT CAN BE UNDONE, and that is what makes a one-tap delete safe on a
+  surface that writes to the bank.** The block, its position, its keywords and
+  its blanks are kept on `_pvoUndo` (capped at `PVO_UNDO_MAX`); ↩ appears on
+  every bar of that question the moment there is something to put back, and
+  Ctrl/⌘+Z with the pointer over (or a selection on) the question does the
+  same. A restore is clamped to the list's length, never doubled when the
+  block came back some other way, and marks the question dirty again.
+- **THE EDITOR FOLLOWS ON THE SAME TERMS AS A MOVE**: only when it holds THIS
+  question and ✏️ editing mode is off (in editing mode the global `blocks` is
+  the whole paper). A restore hands the editor a **COPY** of the block — the
+  editor's array must never share an object with the bank's, or a keystroke
+  there edits the bank before Save.
+- **Delete, not Backspace**, and only on an element that is on a screen
+  (`_pvoTarget`) and never in a text field. Ctrl+Z is claimed only when there
+  is something to undo on a question that is on a screen
+  (`_pvoQuestionShown`) — otherwise it is left to whatever else wanted it.
+- **Only an author, checked in the HANDLER.** A student's device renders the
+  very same preview.
+- Run **`node tools/preview-picture-size-tests.mjs`** and
+  **`node tools/vetting-export-hover-tests.mjs`** after touching any of it.
+
+## House rules
+- After touching **🗑 removing an element from a preview** (`pvoRemove`,
+  `_pvoForgetKeys`, `pvoUndo`, `_pvoUndo`, `_pvoSyncEditorRemove`,
+  `_pvoSyncEditorRestore`, `_pvoCanUndo`, `_pvoQuestionShown`, the `del` /
+  `undo` buttons in `pvoDecorateDoc`, or the Delete / Ctrl+Z branches of
+  `pvoKeydown`), run `node tools/preview-picture-size-tests.mjs` **and**
+  `node tools/vetting-export-hover-tests.mjs`. Every failure is silent and the
+  preview still looks right. Drop the last-block guard and a question is
+  emptied by one tap, prints as a numbered gap and cannot be answered. Leave
+  the keyword marks behind and they come back on the next block given that id.
+  Match keys by prefix without the `_` and removing `p1` takes `p10`'s
+  keywords too. Write on the press and a mis-tap on 🗑 is in the bank before
+  the toast has faded — it must ride the one flush, with ↩ in front of it.
+  Hand the editor the bank's own block object on undo and a keystroke there
+  edits the bank before Save. Let Backspace delete and a teacher who thought a
+  text field had focus loses a figure. And claim Ctrl+Z with nothing to undo
+  and the editor's own undo stops working under an open preview.
+- After touching **✨ ▲▼ ✅ the vetting preview's own tools** (`_pvcOneButtonHtml`,
+  `pvcRun`'s third argument, `job.colour`, `pvoWrapOpen`, `pvoMove`,
+  `_pvoSyncEditor`, `_pvoRerender`, `_pvoTarget`, `pvoKeydown`, `pvoSelect`,
+  `pvoDecorateDoc`, the `blockTags` option or its two call sites,
+  `pvsFlushSettled`, `vetPrintPeekApprove`, `_vetPrintPeekRefresh`,
+  `_vetPrintPeekRender`, or the `data-peek-act` foot), run
+  `node tools/preview-picture-size-tests.mjs` **and**
+  `node tools/vetting-export-hover-tests.mjs`. Every failure is silent and the
+  preview still looks right. Let ✨ and 🎨 each run their own job and two models
+  redraw one picture at once, the second write landing on the first; send the
+  colour prompt from the ✨ button and a teacher who asked for black-and-white
+  gets a coloured picture that looks like the feature working. Make the ▲▼
+  wrapper a real box and the planner paginates a page the printer never prints.
+  Pass `blockTags` from a print path and the printed sheet carries it too.
+  Shuffle the DOM instead of redrawing from `q.blocks` and a picture moved
+  above a page break is shown on the wrong page. Let the keys act on a stale
+  selection and scrolling the bank with ↓ moves a block on a question nobody
+  has open. Sync the editor by block id alone and a duplicated question is
+  reordered through another's preview. And on the APPROVE: approve before the
+  flush has settled — or leave the dirty entry in — and the vetting document
+  the approve just deleted is written straight back, a question in the bank
+  and in vetting at once, which is only found on the next sign-in.
+- After touching **👁 the hover preview** (`_ppHoverKey`, `_ppHoverOver`,
+  `_ppHoverHasPointer`, `PP_HOVER_GRACE_MS`, `ppHoverEl`'s listeners,
+  `_ppHoverOpen`, `ppHoverExpand`'s `settled`, `ppHoverChipLeave`,
+  `ppHoverHide`, `qbTileHoverCancelPending`, `qbTileHoverEnter`, or
+  `renderQuestionBank`'s first two lines), run
+  `node tools/hover-preview-tests.mjs`. Every failure here has the SAME symptom
+  and none of them throws: the card closes by itself, at no fixed moment, so it
+  reads as the app being flaky rather than as anything reportable. Put
+  `qbTileHoverLeave(); ppHoverHide();` back at the top of `renderQuestionBank`
+  and a background re-render — the usage backfill, a cross-tab sync, the
+  auto-tagger — takes away the card a teacher is mid-way through reading, which
+  is exactly what it was reported for. Let `qbTileHoverCancelPending` close an
+  OPEN card and the split that fixes it is undone. Drop the
+  already-open-on-this-question guard and the replacement tile restarts the
+  2.5-second dwell on a card that is already up. Go back to an instant
+  `ppHoverHide()` on the card's own `mouseleave` and the card's own CSS slide
+  closes it. Drop `settled` and the 420ms re-measure yanks it out from under
+  the reader. And trust the rectangle alone and a card mid-transition decides
+  the pointer is elsewhere at precisely the moment it is about to move again.
+- After touching **🎨 colourise from a preview** (`imgEnhancePrompt`, `pvcRun`,
+  `_pvcPump`, `_pvcWork`, `_pvcMarkRecheck`, `pvcRevert`, `pvcBusy`,
+  `_pvcButtonHtml`, `preColourUrl`, `q.recheck`, `_cqRechecks`,
+  `_cqBuildQueue`, `_cqRecheckBanner`, `cqLooksFine`'s clear, or the `colour`
+  control in `_pvsButtonsHtml` / `pvsDecorateDoc`), run
+  `node tools/preview-picture-size-tests.mjs`. This button spends money and
+  overwrites the picture a class is served, and every way it goes wrong is
+  silent. Read the preview's DOM inside `_pvcWork` and the job dies with the
+  preview it was started from — which is the one thing it promised not to do.
+  Hold the question across the image call instead of re-resolving and the write
+  lands in an array nothing renders. Drop the `preColourUrl` set-once guard and
+  colourising twice throws the original scan away for good; restore only the
+  url on a refused revert and the question keeps the colourised picture with
+  nothing left to undo it with. Keep a second copy of the prompt and the editor
+  and the preview return different pictures from the same button. Stop putting
+  rechecks at the FRONT of the check queue — or filter them by
+  `CQ_RECENT_DAYS` — and a colourised question is buried under everything added
+  since, which is the same as never queueing it. Leave `q.checked` set and it
+  is never offered at all. Drop `pvcBusy()` from `_xtWorkInFlight` and closing
+  the tab mid-call loses a picture that exists nowhere else yet. And bind the
+  decorator by index again and the next control added re-points its
+  neighbours' handlers.
+- After touching **🛠 the worksheet builder's controls** (`wsSyncToolsTop`,
+  `_wsToolsInit`, the `#page-worksheet .ws-actions-bar` rules, `--ws-gutter`, or
+  the order of the blocks in `#page-worksheet`'s `.page-body`), run
+  `node tools/worksheet-controls-tests.mjs`. Every failure is silent and the
+  page renders perfectly: put the bar back below `#wsQuestionGrid` and Print is
+  a hundred questions away again, which is what it was reported for. Make the
+  BARE `.ws-actions-bar` sticky and the community quest picker — which reuses
+  this markup inside its own scroller — gains a bar it has no room for. Give it
+  a z-index of 50 or more and it covers the page header instead of sliding
+  under it; give it `top: 0` and it hides beneath one. Hard-code the offset and
+  it is right on a laptop and wrong on a tablet. Drop the gutter bleed and the
+  cards scroll through the margins beside it. And leave it sticky on a phone and
+  three rows of buttons eat the screen the list is meant to fill.
+- After touching **🐾 one part's answer** (`MK_RUN_MIN`, `MK_RUN_RE`,
+  `_mkAnswerRuns`, `_mkAnswerFor`, `_mkPartNamed`, `_mkSpansParts`,
+  `_mkShownAnswer`, `_mkModelAnswer`'s `part` argument, the `cut` in
+  `_mkEntryFromAnalysis`, the cut in `_mkCandidatesFrom` or `_mkOwnEntries`,
+  the stand-down in `_mkMarkedEntry`, the `"part"` field in `_mkAnalysePrompt`,
+  or `.mk-cut`), run `node tools/mistake-bank-tests.mjs`. Both directions are
+  silent and the card still paints. Stop cutting and a lesson about (b) opens
+  with a paragraph of (a) that is right, is never mentioned again, and
+  overflows the box before the child reaches the part the mistake is in —
+  which is exactly what it was reported for. Cut in the WRONG place and the
+  lesson is served with half its science missing: let one marker split an
+  answer, or a letter that does not follow the one before it, or an UPPERCASE
+  "E." that is the organism the answer names, and a sentence is torn in two on
+  a card that reads perfectly. Cut on a key that names nothing in the answer
+  and the whole answer disappears. File a spanning candidate from the MARKING
+  and the lesson points at whichever sub-question the guess landed on — there
+  is no AI call on that path, which is why it stands down instead. Leave
+  `_mkCandidatesFrom` uncut and the ✨ prompt is handed both parts, so the
+  correction it writes covers both. And show the STORED answer on the teacher's
+  card and an entry is approved against a rendering the class never sees.
+- After touching **🐾 the open-ended gate** (`_mkOpenAnswer`, `_mkModelAnswer`'s
+  `openOnly` flag, `MK_GEN_OPEN_RULE`, `_mkGenPrompt`, `mkGenerateRun`'s pool
+  filter, `mkGenerateOne`'s re-check, `_mkMcqOnlyEntry`, the fourth gate in
+  `_mkVisibleToStudent`, the ⚠ badge in `_mkCardHtml`, or `.mk-badge.mcq`), run
+  `node tools/mistake-bank-tests.mjs`. Every failure is silent and the card
+  still renders: drop either gate and ✨ Write wrong answers goes back to
+  inventing prose "mistakes" for questions whose whole answer is a tick in a
+  box — a card that reads perfectly and teaches a habit nobody could have had,
+  which is exactly what it was reported for. Hand the generator
+  `_mkModelAnswer` again and it is prompted with "(2) The tiny hairs…", so the
+  answer it writes opens with an option number on a written question. Let
+  `openOnly` leak into any OTHER caller and a real marked wrong answer loses
+  the option that WAS the correct answer. Flag a question with BOTH halves and
+  every explain-your-choice question in the bank is withheld from the class and
+  badged as broken; flag one that has LEFT the bank and every entry outliving
+  its question is too. Ask only for the absence of a written answer and the
+  badge starts claiming "multiple choice" about questions with no answer
+  recorded at all. And let the card and the student gate read two different
+  tests and an entry is flagged on one screen and quizzed on the next.
+- After touching **🐾 which part the mistake is in** (`MK_PART_RE`,
+  `_mkPartKey`, `_mkPartWhat`, `_mkPartNote`, `_mkQuestionBlocksHtml`'s
+  `opts.part`, `_partLabelFor`, the `label` on `fcNoteMistakes`'s parts,
+  `rec.part`, `_mkOwnEntries`' read of it, or the `.mk-qb-this` / `.mk-qb-here`
+  / `.mk-where` rules) — or **🗑 clearing the bank** (`MK_STATUS_ALL`,
+  `_mkPicked`, `_mkHaystack`, `_mkVisible`, `_mkPruneSelection`,
+  `mkTogglePick`, `mkPickAll`, `_mkDeleteMany`, `mkDeleteSelected`,
+  `mkDeleteAllShown`, the 📚 All chip, the bulk bar, or `.mk-pick`) — run
+  `node tools/mistake-bank-tests.mjs` **and**
+  `node tools/usage-tracker-tests.mjs`, which pins the one derivation the part
+  now rides. Every failure is silent and the card still paints. Say nothing
+  and the lesson is about a three-part question with no pointer, which is the
+  fault this fixed; GUESS and it points at the wrong sub-question, which is
+  worse — so a part naming no block in the drawn question must keep marking
+  nothing. Parse the label privately instead of through the app's own part
+  vocabulary and `(i)` is filed as part i, which is not a part letter here.
+  Print the raw stored label and every single-part question reads "part
+  Answer". Write `rec.part` as an empty string rather than leaving it absent
+  and a later reader takes it for a part. And on the DELETE half: scope
+  🗑 Delete all to `_mk.bank` rather than to `_mkVisible()` and it destroys the
+  entries the teacher had filtered away and never saw; drop an entry from the
+  page on a delete the database refused and it is back at the next sign-in;
+  stop pruning the ticks and "3 selected" outlives the cards it counted; hold a
+  tick as a flag on an entry and every reload drops it; gate the delete on the
+  button rather than in the handler and the page has no lock at all; and let
+  `appearance: auto` off `.mk-pick` and the tick is an invisible white square.
+- After touching **🐾 the question on a mistake card** (`MK_Q_BLOCKS`,
+  `_mkQuestionBlocksHtml`, `_mkQuestionHtml`, the call in `_mkRenderSession` or
+  `_mkCardHtml`, or the `.mk-qbody` / `.mk-qb-*` rules), run
+  `node tools/mistake-bank-tests.mjs`. Both directions are silent and the card
+  still paints. Stop drawing and it is a grey paragraph again — stem, lettered
+  statements and options run together with the figure dumped underneath — and
+  nobody reports a card that has always looked like that. Draw a block that
+  carries an ANSWER — reach for `renderQuestionBodyPreviewHtml` (it prints the
+  model answer), for `renderImportedBlockStudent` (its fill-in-the-blank is the
+  REVIEW rendering, answers in the slots), or turn the allowlist into a
+  skip-list — and the card hands a child the answer they are being asked to
+  write, on the one screen whose whole job is to make them write it. Mark the
+  correct option and the quiz above it is answered before it is read. Rewrite
+  the STORED wording instead of drawing it and every mistake already served is
+  served again, because the feed's content key moves with it. And let the two
+  cards drift apart and a teacher approves a lesson against a rendering the
+  class never sees.
+- After touching **🐾 the mistake analysis that follows a sidekick**
+  (`_mistakeAnalysisFor`, `_mcqChoiceLabel`, the `mistake` / `mistakeWhy`
+  fields or `MISTAKE_ANIMAL_RULE` in any of the three marking prompts,
+  `prepareMistakeAnalysis`, `mountMistakeAnalysis`, `resetMistakeAnalysis`,
+  `scienceCoachMotion`, `renderMistakeAnimalAvatar`, `MISTAKE_ANIMAL_ART_IDS`,
+  `mistakeAnimalAccent`, `_mkFigure` / `_mkMotion`, or the mount and reset
+  calls in `_showScienceCoachFeedback` / `_resetOpenScienceCoaches` /
+  `_captureScienceCoachTarget`), run
+  `node --test tools/science-coach-core-tests.mjs tools/science-coach-integration-tests.mjs tools/science-mistake-tests.mjs`,
+  `node tools/mistake-bank-tests.mjs`, `node tools/teaching-notes-tests.mjs`
+  **and the Playwright harness** `tools/science-coach-browser-tests.mjs`. Every
+  failure is silent and the answer is still marked. Let `prepareMistakeAnalysis`
+  accept an animal off the list and the card names a habit nobody can act on;
+  let it draw on a correct or blank verdict and a child is told they made a
+  mistake they did not make. Mount it BEFORE the coach and the two cards read
+  the wrong way round — the harness measures the boxes because the source
+  cannot see it. Keep a second motion flag and one Pause button pauses one
+  card and not the other. Drop `resetMistakeAnalysis` from either reset and a
+  re-check leaves last answer's lesson under this answer's mark. Write the
+  question or the student's words into the card unescaped, or draw a picture
+  from any scheme, and a classmate's sentence runs in another child's page.
+  Ask for the habit in a SECOND call and the animal and the verdict come from
+  two different readings. And let the taxonomy block drift from
+  `polymathlc/scan` and `polymathlc/anskey` and the same habit wears three
+  animals in three apps.
+- After touching **🐾 the filed habit, the child's own page or the MCQ gate**
+  (`_partMistakeOf`, `_setPartResult`'s seventh argument, the `mistake` fields
+  on `_attemptAnswers` / `fcNoteMistakes`, `_mkMarkedEntry`, `_mkFileMarked`,
+  `_mkHarvestNote`, the auto harvest in `mkRender`, `_mkOwnEntries`,
+  `_mkStudentPool`'s `'mine'` mode, `_mkOwnSectionHtml`, `mkStudyOwn`,
+  `_mkNormaliseEntry`, `_coachKindIsMcq`, the `kind === 'open'` branch of
+  `markQuestionPart`'s prompt, or `MISTAKE_ANIMAL_ALIASES`), run
+  `node tools/mistake-bank-tests.mjs`, the three `node --test` coach suites and
+  the Playwright harness. Every failure is silent and the answer is still
+  marked. Store the habit on an `mcq:` key — or mount a card on an mcq context
+  — and a child is told their cross on "(3)" showed a habit nobody can act
+  on; drop the key from `_setPartResult` and every MCQ habit the model
+  invents is filed. File a marked candidate anywhere but through
+  `_mkEntryFromAnalysis` and a child's name reaches the bank; file it approved
+  and it reaches a student unvetted. Let the own page read the class bank and
+  a classmate's answer is shown as "You wrote"; let it skip the serving gates
+  and a held-back paper is studied through a wrong answer to it. Drop
+  `_mkNormaliseEntry` and every entry filed before v1.394.0 is an unknown
+  mistake the quiz cannot ask about. And let the taxonomy drift from
+  `polymathlc/scan` and `polymathlc/anskey` and the same habit wears three
+  animals in three apps.
+- After touching **🐾 the mistake bank** (`MISTAKE_ANIMALS`, `mistakeAnimalNormalize`,
+  `MISTAKE_ANIMAL_RULE`, `_mkEntryFromAnalysis`, `_mkCandidatesFrom`, `_mkVisibleToStudent`,
+  `_mkQuizOptions`, `_mkAnalysePrompt`, `mkAnalyseCandidate`, `mkGenerateOne`, `mkApprove`,
+  `_mkWrite`, `_mkStudentPool`, `mkCheckRewrite`, `_mkLogQuiz`, or the `mistakes` row in
+  `USAGE_MODES`), run `node tools/mistake-bank-tests.mjs` **and**
+  `node tools/scheduled-release-tests.mjs`, `node tools/teaching-notes-tests.mjs` and
+  `node tools/usage-tracker-tests.mjs`. Everything this page serves is another child's wrong
+  answer, so every failure is silent and lands in front of a class. **Let an entry carry a uid,
+  an email or a name — or keep `raw` past approval — and a student is reading which classmate
+  got it wrong.** Let `_mkVisibleToStudent` stop asking `approved`, or the animal, or the three
+  serving predicates, and an unvetted, untyped, held-back or off-level mistake is quizzed on;
+  let `mistakeAnimalNormalize` accept an invented animal and the quiz's right answer is a habit
+  nobody can name. Let the clean-up fix the science and the class studies a lesson about
+  nothing. Ground the analysis as `'mark'` and the lesson is written in nobody's voice; ground
+  the rewrite check as `'teach'` and the marker has been handed the exemplars. Let the quiz call
+  `rpgAwardGameQuestion` and a four-option guess is a points farm. And let the taxonomy drift
+  from `polymathlc/scan` and `polymathlc/anskey` and the same habit wears three different
+  animals in three apps that were meant to agree.
+- After touching **🔍± the preview picture size** (`pvsFind`, `pvsBarHtml`, `pvsWrapAttrs`,
+  `pvsPaint`, `pvsStep`, `pvsReset`, `pvsFlush`, `pvsDecorateDoc`, `imgScaleStep`,
+  `_imgRenderedPct`, the image branch of `renderQuestionBodyPreviewHtml`, either print
+  builder's `pvsWrapAttrs`, the `pvsDecorateDoc(doc)` in `_wsPreviewPack`, or the `pvsFlush()`
+  at the top of any preview's close), run `node tools/preview-picture-size-tests.mjs`. Every
+  failure here is silent and the preview still looks right. **A close that stops flushing is the
+  worst of them**: the teacher watches the picture change size, the hover closes, and the size
+  never reaches the bank — which is exactly the edit this exists to save. Write on every press
+  and one decision is four documents; write a question that has been deleted and it is back.
+  Let `Auto` set 0 instead of DELETING the field and "no size chosen" means two different things
+  to two callers. Render the pill for a student and a hover writes to the bank. Drop the
+  `pvsWrapAttrs` from one print builder and the 👁 hover's pictures carry no pill on one print
+  button and do on the other. Let the iframe's inline `onclick` stand instead of BINDING the
+  handlers and every press inside the peek is a `ReferenceError` in a window that has no
+  `pvsStep`. Sync the editor by block id alone and a duplicated question's picture is resized
+  through another question's hover. And put the pill in the FLOW of an exported page and the
+  planner's measured pagination is a few pixels short on every page that holds a picture.
+- After touching **🖼 the image engine** (`OPENAI_IMAGE_DEFAULT_MODEL`,
+  `OPENAI_IMAGE_MODELS`, `OPENAI_IMAGE_25_RE`, `OPENAI_IMAGE_SUPERSEDED`,
+  `getOpenAiImageModel`, `aiImageEngineSetting`, `imageEngineOrder`,
+  `imageOpenAiPossible`, `openAiGenerateImageDataUrl`, `openAiImageServer`,
+  `generateImageDataUrl`, `_imgRouteFault`, `_imgQualityFor`,
+  `generateEnhancedImageDataUrl`, `generateImageDataUrlGemini`, `_tcgGenOnce`,
+  `_diagramDraw`'s draw line, `_aiImageFromDoc`, `aiEngineSetShared`'s third
+  argument, the **Pictures** radios, or `cleanFigure` in `mistakes.html`), run
+  `node tools/image-engine-tests.mjs`, and `node tools/ai-routes-tests.mjs`,
+  `node tools/auto-diagram-tests.mjs` and `node tools/paper-clean-tests.mjs`
+  beside it. A picture comes out whichever model drew it, so every failure
+  here is silent. **Let a caller reach `generateImageDataUrlGemini` or
+  `geminiImageModels` directly and that surface quietly stays on Gemini** while
+  every other picture moved — the census at the foot of the harness is what
+  catches the next one. Put `openAiActive()` back in front of the ChatGPT
+  route and the chat toggle decides who draws again, which is two accidents
+  deciding what a monster looks like. Mark the server route down on an
+  `invalid-argument` and one odd-sized picture closes ChatGPT Images for ten
+  minutes on every picture after it. **Send `input_fidelity` to the 2.5 family
+  and every edit in the app is refused and drawn by Gemini** — the badge is
+  the only thing that says so, and it did. Let a stored id the dropdown
+  no longer offers reach the API and every picture is a 404 with nothing on
+  screen to say the id is merely out of date. Lift the image model without the
+  `OPENAI_IMAGE_GEN` flag and a deliberate legacy pick is undone on every
+  reload; forget the lift and the new default reaches nobody who ever opened
+  the dialog. And let the server accept a model outside `OPENAI_IMAGE_MODEL_RE`
+  and a client is naming models on the centre's bill.
+- After touching **any surface that shows a PROOF of a printed sheet** — the
+  live A4 preview, 🗂️ Custom Paper's `buildOpts`, or the 👁 Vetting hover — make
+  it read the same switches as the printer that makes that sheet, and run
+  `node tools/objectives-box-tests.mjs`. A preview reading one set of switches
+  and the PDF another does not throw and does not look wrong: it looks like a
+  working preview of a sheet that will never come out of the printer, which is
+  the one thing a preview must never be. `buildOpts` is assigned OVER the
+  preview's base object, so a Custom Paper option that is merely ABSENT is not
+  off — it is whatever the print picker happens to be set to.
+- After touching **🎯 the learning-objectives box** (`OBJBOX_*`, `objBoxLines`,
+  `objBoxLabel`, `objBoxPrintHtml`, `objBoxScreenHtml`, `objBoxPreviewHtml`,
+  `objBoxAutoHtml`, `OBJBOX_SWITCHES` / `objBoxPrintOn`, either print builder's
+  `case 'objectivesBox'`, the `_wsPreviewCtx` branches, or the
+  `.print-objectives-*` CSS), run `node tools/objectives-box-tests.mjs`. Every
+  failure here is silent and the sheet still prints. **The two print builders
+  drifting apart is the worst of them**: the box appears on a worksheet printed
+  from the bank and not on the same worksheet printed from 📄 My Worksheets,
+  which is the fault those two had already had once over the MCQ answer. Let
+  anything about the box reach the ANSWER KEY and a teacher is handed a row
+  they cannot mark against a question that has no answer. Drop the
+  already-has-a-box test and the switch that promises ONE box prints two.
+  Let `objBoxLabel` fall back on an EMPTY label and the heading comes back on
+  the box an author had just cleared — which is the half of "blank" that is
+  easiest to undo by accident. Let `objBoxLines` return zero and the box
+  renders perfectly with nothing to write on. And emit the automatic box after
+  the chunk's closing `</div>` and it belongs to no question at all, measured
+  against the wrong page.
+- After touching **📚 the bank picker or 🔢 the auto-marks** (`cpbQuestionFromBank`,
+  `cpbBankCount`, `cpbBankOpen` / `cpbBankClose`, `_cpbBankFilters`,
+  `cpbBankMatches`, `cpbBankRender`, `cpbBankAdd`, `cpbAutoMarks`,
+  `cpbMarksMissing`, `cpbAssignMissingMarks`, the `toSend` filter in
+  `_cpbCommit`, the `fromBank` count in `cpbSend`, the 📚 chip in `_cpbRowHtml`,
+  `#cpbBankOverlay` or the `.cpbb-*` CSS), run
+  `node tools/custom-paper-tests.mjs`. **The one that reaches a child is the
+  send**: let it stop skipping `_cpbFromBank` and `clean.holdBack = true` is
+  written onto a question that is already LIVE, withdrawing it from every
+  practice mode, game, quest and other worksheet in the school and re-filing it
+  under this paper's name — silently, because the send reports only how many
+  documents went. Answer that by copying the question under a new id instead and
+  it is worse, not safer: the original stays released, so the promise is fake,
+  and the bank gains a duplicate of everything picked. Everything else is quiet
+  in its own way. Drop the deep copy and a reorder, a booklet move or an ✏️ Edit
+  on the paper rewrites a live bank question. Drop the from-bank flag and the
+  send has nothing to skip on. Fork `_wseBank()` and the picker offers questions
+  no student can ever be served. Drop the already-on-the-paper test and a
+  question prints twice, numbered twice; push a missing id on anyway and the
+  page throws mid-add. Use `.active` instead of `.show` and 📚 Add from the bank
+  opens nothing at all. And on the MARKS: let `cpbAutoMarks` overwrite and a
+  paper's own allocation is replaced by a default, which changes what a class is
+  marked out of; stamp only the first opener and a three-part question is worth
+  2 with two of its headings unmarked; let a non-text block carry marks and a
+  number is written where nothing can print it; and drop the `_cpbBusy` guard
+  and a stamp lands on a question the send loop has already copied.
+- After touching **👁 the one-question preview** (`cpbPreviewQuestion`, the
+  `'cpbq'` source in `previewQuestionsPrint` / `_wsPreviewIsDraft` /
+  `_wsPreviewSnapshot`, the `custompaper` branch of `printFromPreview`,
+  `_vetPeekQuestion`, `vetPrintPeekButton`'s `scope`, `vetPrintPeekFull` /
+  `vetPrintPeekEdit`'s `scope`, the eye in `_cpbRowHtml`, or
+  `vetPrintPeekHide()` in `cpbRender`), run
+  `node tools/custom-paper-tests.mjs` **and**
+  `node tools/vetting-export-hover-tests.mjs`. Every failure is quiet and the
+  page carries on working. **Collapsing `'cpbq'` into `'custompaper'` is the
+  worst of them**: pressing 🖨 on a proof of one question prints the entire
+  booklet set, covers and all, which is minutes of layout and a wasted ream.
+  Let `'cpbq'` fall through to `bank` and ✏️ Editing mode is offered on a
+  question the bank has never heard of — `emSaveAll` then writes it there
+  behind the teacher's back. Resolve a paper row's id against `vettingList`
+  and the eye shows a DIFFERENT question that happens to share an id, which
+  looks like a perfectly ordinary preview. Hold the question rather than
+  deep-copying it and the preview can write back into the paper. Route the
+  peek's ✏️ Edit question to `editQuestion` and it finds nothing, so the
+  button silently does nothing. And drop `vetPrintPeekHide()` from
+  `cpbRender` and the peek is left floating over a row that no longer exists.
+- After touching **📸 the incremental read** (`_cpbUnread`, `_cpbUnreadIsTail`,
+  `_cpbSeedQuestion`, `_cpbLastRead`, `o.seed` on `readQuestionRun`,
+  `cpbBuild` / `cpbRebuild` / `_cpbRunBuild`'s `mode`, or the `_cpbDirty` rule
+  in `_cpbAddFiles` / `cpbRemove` / `cpbClearShots`), run
+  `node tools/custom-paper-tests.mjs`. Both directions are silent and the page
+  reads perfectly either way. Make the ordinary button re-read the whole pile
+  again and it is minutes of AI calls for three questions **and** the teacher's
+  own order and booklet moves thrown away — which is the fault this fixed.
+  Drop `o.seed` and a question pasted in as two screenshots comes out as a
+  second question with no stem and no figure. Seed when the unread screenshots
+  are NOT the tail and a retried failure from the middle of the pile is
+  grafted onto a question from the end, reading as one perfectly ordinary
+  question. Hold the seed as an object rather than an id and it goes stale the
+  moment the list is reordered or a question is edited. Read the seed after the
+  run has reset the statuses and the tail test always says no, so the join
+  never happens at all. And put `_cpbDirty = true` back on an ADD and the page
+  nags for a full re-read on the one action that is now the ordinary flow.
+- After touching **✏️ the Custom Paper edit round-trip** (`_editorLoadQuestion`,
+  `_cpbEdit` / `_cpbEditActive` / `_cpbEditFocus`, `cpbEditQuestion`,
+  `_cpbCarryOver`, `cpbEditSave`, `_cpbFocusScroll`, the `_cpbEditActive()`
+  guards on `saveEditedQuestion` / `saveEditToBank` / `moveEditToVetting` /
+  `openEditorRelease` / `saveEditorRelease`, or `#cpbEditActions`), **🖼 the
+  figure enhancement** (`CPB_ENHANCE_MAX`, the `enhance` switch, `o.enhance`,
+  `_epCropInto`'s `budget`, `opts.onEnhance`) or **📁 saved papers**
+  (`CPB_LIB_*`, `cpbLibLoad`, `cpbSavePaper`, `_cpbLibOpenNow`, `cpbLibOpen`,
+  `_cpbLibMarkSent`, `cpbLibDelete`, `cpbNewPaper`), run
+  `node tools/custom-paper-tests.mjs`, `node tools/editor-release-tests.mjs`
+  and `node tools/preview-return-tests.mjs`. Every failure here is silent and
+  the page carries on working. **A save that reaches the bank is the worst of
+  them**: the paper and the bank then each hold half the question, with nothing
+  on any screen reporting it — which is why the hidden row is not the lock and
+  all four bank doors carry a guard. Let `_editorLoadQuestion` look a question
+  up and ✏️ Edit silently does nothing at all, because a paper question is in
+  neither list. Write a second carry-over list instead of reading
+  `EDITOR_OWNED_QUESTION_FIELDS` and the teacher's own ⇄ booklet override is
+  thrown away by opening the question and pressing Save. Declare `_cpbEdit`
+  down beside the page and `setEditMode` reaches it during module evaluation
+  and takes the whole app down on load. Lose `_cpbEditFocus` and the teacher is
+  put back at the top of a forty-question paper after every fix, which is
+  exactly the hunt this removed. On the FIGURES: hold the budget per CALL
+  rather than per RUN and a forty-question paper has no cap at all; decrement
+  it by the return value and it is spent on pictures that were never enhanced;
+  pass one from the exam paper builder and an imported paper costs dozens of
+  image calls nobody asked for. And on the SHELF: save the screenshots and the
+  document dies at 1 MB with the paper unsaved; mark an opened paper dirty and
+  the page nags to re-read screenshots it no longer has, one press from wiping
+  the questions; clear a SAVED paper on send and the shelf loses the very thing
+  it was for.
+- After touching **🅰 the two modes** (`CPB_MODES`, `cpbMode`,
+  `cpbIsWorksheet`, `cpbThing`, `cpbSetMode`, `cpbLayout`, `cpbDefaultMarks`,
+  `CPB_TARGET_QUESTIONS`, `_cpbWorksheetOpts`, `_cpbOutputOpts`,
+  `_cpbWorksheetSetupHtml`, `_cpbWorksheetListHtml`, or the `mode` /
+  `targetQuestions` / `wsIntro` / `wsFields` meta fields), run
+  `node tools/custom-paper-tests.mjs`. The mode decides the FORMAT and nothing
+  else, so every failure prints perfectly in the wrong shape. **Fail the
+  fallback the other way** — read a missing or stray `mode` as a worksheet —
+  and a mock exam comes off the printer with its covers, its booklet split and
+  its answer sheet gone, on the morning a class sits it. Number a worksheet
+  through the booklet model and its MCQs are hoisted to the front of a sheet
+  whose order was the whole point of arranging it. Pass a `paper` option in
+  worksheet mode and it quietly grows an exam paper's gutter numbers and loses
+  the bracket its MCQs are answered in. Branch `_cpbCommit` on the mode and you
+  have a mode whose questions reach students — the one failure this page must
+  never have. And let switching modes throw away a ⇄ override or a typed field
+  and it becomes a switch nobody dares press.
+- After touching **🗂️ Custom Paper** (`cpb*` / `CPB_*`, `qIsMcqOnly`,
+  `readQuestionRun` and its two callers, the `paper` option in
+  `buildWorksheetHtml`, `_printFrontAnchor` / `_printFrontRestarts` /
+  `_printFrontPlacement`, `qHeldBack` inside `qReleased`, or
+  `_bankSetHold` / `bankUnholdPaper`), run
+  `node tools/custom-paper-tests.mjs` **and**
+  `node tools/scheduled-release-tests.mjs`. This page prints the sheet a class
+  actually sits, so every failure is met in an exam hall rather than at a
+  keyboard, and none of them throws. Read the booklet from the model's own
+  `questionType` instead of from the blocks — or drop the "and nothing else"
+  half of `qIsMcqOnly` — and a question that needs somewhere to write is
+  printed in Booklet A, answerable in the wrong place. Number each booklet from
+  1 instead of running them together and every answer on the key is against the
+  wrong question; number by position in the LIST rather than within the booklet
+  and an interleaved paper comes out numbered at random, printing perfectly
+  either way. Let Booklet B's cover lose its anchor and it is hoisted on top of
+  Booklet A's; anchor it to the QUESTION rather than to the instruction chunk
+  that starts the page and it lands between the two; and drop the anchor
+  entirely and every worksheet cover in the app is still fine, which is what
+  makes it easy to miss. Fork `readQuestionRun` and this page silently stops
+  joining the three screenshots that are one question while the exam paper
+  builder carries on doing it. Lift `qHeldBack` out of `qReleased` into a gate
+  of its own and the next pool somebody writes serves next week's paper to the
+  class sitting it — put `holdBack` into `EDITOR_OWNED_QUESTION_FIELDS` and an
+  ordinary edit releases the whole paper at once. And prefill a cover with a
+  real examination board's name and the centre is handing out something that
+  passes for an official paper. On the TARGETS: let one reach a cover and the
+  paper claims a mark total it does not have; drop the unit from `cpbGapLabel`
+  and Booklet A's chip and Booklet B's read identically while counting
+  different things; and stop treating 0 as "no target" and every short topical
+  paper is nagged for being 22 questions short of a PSLE paper.
+  On the **KEEP**: drop `_cpbKeepOnExport()` from `cpbPrint` and the export
+  persists nothing again — a paper built at home and printed is gone the moment
+  the browser closes, on any machine but that one, with the questions not in
+  the bank either. `await` it and a dead connection is a print that never
+  happens. Let `cpbSavePaper` write a document of its own instead of going
+  through `_cpbWritePaper` and the button and the export drift apart over the
+  caps and the payload, which is that same loss arriving through its own fix.
+  Drop the `_cpbLibId ||` and a paper exported six times is six shelf rows;
+  make the automatic keep refuse an unnamed paper and the papers most likely to
+  be lost are exactly the ones it skips; and swallow a failed keep and the
+  teacher is told the export saved a paper that it did not.
+- After touching **🚦 the auto-check** (`AUTOCHK_TRIES`, `AUTOCHK_KEEP_FINDINGS`,
+  `autoChkOn`, `autoChkRead`, `autoChkState`, `autoChkBetter`, `autoChkRun`,
+  `_autoChkRepairPrompt`, `_autoChkApply`, `autoChkStamp`, `autoChkCardHtml`,
+  `autoChkTally` / `autoChkBatchNote`, `_tlFromStamp`, step 2c in
+  `processRapidJob`, or the `autoCheck` delete in `qMergeQuestions`) — or
+  **[2] the marks lift** (`AI_MARKS_MAX_LIFT`, `_aiMarksSane`, `_aiLiftMarks`,
+  the MARKS clause in `_partsPromptRules()`, the `marks` field in the four build
+  prompts, or the text branch of `buildBlocksFromAi`) — run
+  `node tools/auto-check-tests.mjs` **and** `node tools/traffic-light-tests.mjs`.
+  This loop reads every question the pad builds and then REWRITES the ones it
+  does not like, so it can damage a question no human has looked at yet, and
+  every way it goes wrong is silent. **A green lamp that lies is the worst of
+  them**: let a failed or switched-off AI call end green and a question nothing
+  ever read is approved unread. **A question withheld is the second** — one
+  quietly held back because a model disliked it is one its author never finds
+  out about, which is far worse than an amber card. Keep whatever the LAST try
+  produced instead of the best one and three AI calls are spent handing back
+  something worse than what went in. Drop the positional picture re-attach and
+  every repaired question lands wearing *Diagram missing*, indistinguishable
+  from a page whose rectangles failed; let a short reply lose a leftover figure
+  and the question cannot be answered at all; let a long one add a placeholder
+  and it prints as a blank space. Accept an EMPTY reply and a truncated repair
+  replaces a whole question with nothing. Skip the level re-apply and a repair
+  that moved the topic silently re-files the question, because in this app the
+  level is read off the topic. Ask a model for the verdict instead of
+  `tlVerdict`, or write a second checking prompt, and the card's lamp and
+  ✅ Check Questions start disagreeing about the same question. And drop
+  `_tlFromStamp` — or its `sig` — and a card opened the next morning wears a 🔴
+  badge over a grey lamp with nothing behind it, or worse, yesterday's colour
+  over wording that has been rewritten since. On the MARKS half both directions
+  are silent and land on a printed sheet: lift too eagerly and `[1998]` is
+  printed as a mark allocation, lift a number the paper never showed and a class
+  is offered marks they can never earn, forget to strip the marker and the sheet
+  reads "… at point A. [2] [2]", and let a block with no marks render as
+  anything but what it always did and the whole bank changes at once.
+- After touching **⏳ the batch release date** (`qReleaseOn`, `qScheduled`,
+  `qReleased`, `qReleaseChipHtml`, `releaseDayKey`, `rapidRelease` /
+  `setRapidRelease`, `_rapidApplyRelease`, the `release` carried through
+  `rapidAddFiles` / `startRapidJob` / `_rapidQueuePdf` / `_rapidExpandPdf` /
+  `processRapidJob`, `_bankSetRelease`, or a serving pool's `qReleased(q)`
+  line), run `node tools/scheduled-release-tests.mjs` **and**
+  `node tools/rapid-pdf-tests.mjs`. Every failure here is silent in one
+  direction or the other and both land on a class. A pool that stops asking the
+  gate serves next term's paper this week, on a card that looks perfectly
+  right — which is what the CENSUS at the foot of that harness exists to catch
+  on the NEXT pool rather than the last one. A gate that gets too eager is
+  worse: read a `Date`, an ISO timestamp or a date that has already come round
+  as a schedule and the question vanishes from every practice mode, every game
+  and every quest at once, for ever, with nothing anywhere to say why — which is
+  why `qReleaseOn` fails OPEN and only ever accepts `YYYY-MM-DD`. Read the day
+  off the device instead of off Singapore and a paper is out early on half the
+  class's phones. Read the picker inside the job rather than at the door and the
+  back half of a forty-page paper is filed on whatever date the author moved to
+  next. And put `releaseOn` into `EDITOR_OWNED_QUESTION_FIELDS` without giving
+  the editor a control for it and every edit silently releases the question. And drop the LOCK
+  (`qLockedFrom`, `qLockSplit`, `qLockNote`, `_wsResolve`, or
+  `launchWorksheetPractice`'s gate) and next term's paper is practised,
+  previewed and printed by a student off a worksheet the teacher built weeks in
+  advance — while applying that lock to the AUTHOR takes the question off the
+  very surface it was scheduled to be built on, which reads as a save that
+  failed. A locked question SILENTLY dropped is the third way: a numbered sheet
+  with a hole in it, which reads as a printing fault.
+- After touching **🅐 ✍️ one half of a past paper** (`PP_KINDS`, `ppKindDef`,
+  `ppKindOf`, `ppKindFilter`, `ppKindBankQs`, `ppKindCounts`, `ppKindTitle`,
+  `ppPaperHitIds`, the `kind` argument on `ppPracticeYear` / `ppPrintYear`, or
+  the 🅐 / ✍️ tiers in the *Practise the papers* card), run
+  `node tools/paper-halves-tests.mjs`. Every failure is silent — the button
+  works, a sheet comes out, a session starts, and it is simply the wrong half.
+  **Reading the paper row's `bk` or `type` instead of the attached bank
+  question's blocks is the worst of them**: a Booklet A row can perfectly well
+  have an open-ended question attached, so a child is handed a question they
+  cannot answer by picking an option, behind a button that looks as though it
+  worked. Write a second reading of the half anywhere — in the filter, in the
+  counts, at a call site — and the tier says "28 questions" over a sheet that
+  prints 30, which is found after the printing. Let a stray kind filter the
+  portion away instead of leaving it whole and the button silently does nothing.
+  Put `ppPrintYear('')` back to one year and every All-years tier prints an empty
+  paper. Filter `missing` to the half and a row with nothing attached — which
+  belongs to neither half — stops being reported at all. Name a booklet on the
+  cover and the sheet claims something the code never checked. And gate the tiers
+  on `_canAuthor()` and the students who can already print a whole past paper
+  from that card can no longer print half of one.
+- After touching **📋 the format check** (`PF_KINDS`, `pfPartsWithoutMarks`,
+  `pfPartsWithoutExplanation`, `pfTakesKeywords`, `pfCheckQuestion`,
+  `pfCheckItems`, `pfSummary`, `pfRunOn`, `pfEditOne`, `pfEditFlagged`, or the
+  `formatBtn` / `formatAllBtn` on the papers page), run
+  `node tools/paper-format-tests.mjs`. Every failure is silent and the paper
+  still prints: too timid and a part with no note, no number or no keywords is
+  reported complete and met in front of a class; too eager and it flags "no
+  keywords" on a multiple-choice question with nowhere to put one, which is
+  the row that gets the real ones clicked past. Count an answer box's marks
+  and a part with no number on the paper reads as marked; stop walking the
+  sub-parts and a mark on (b)(i) no longer covers (b); drop an unattached
+  question from the rows and the report reads as a clean paper; and let ✏️ Fix
+  them all open anything but the FLAGGED questions and the author is scrolling
+  a paper looking for gaps the report had already found.
+- After touching **🚦 the traffic light** (`tlVerdict`, `tlSig`, `tlStateOf`,
+  `tlRun`, `tlCheckMany`, `tlLightHtml`, `tlWordFor`, `tlRepaint`,
+  `tlQuestionFor` / `tlEmQuestion` / `tlCreateQuestion`, `tlCreateActive`,
+  `tlSyncScreen` / `tlEmSync` / `tlCreateSync`, `tlRenderEmBar`,
+  `tlRenderCreateBar`, `tlFixCreateOptions`, `tlCheckSheet`, `_cqFindingHtml`'s
+  `scope`, `TL_LOOKS`, `TL_PAR`, `TL_MANY_MAX`, or any renderer's `tlRepaint()`
+  call), run `node tools/traffic-light-tests.mjs`. There is only ONE failure here that
+  matters and every case in that harness is a way of producing it: **a green
+  lamp that lies**. It is read at a glance, on a list of forty questions, by
+  somebody about to print them — so drawing "not checked" the same as "checked
+  and clean" inverts the whole feature; letting a failed or switched-off AI
+  call end green says a question was read when nothing read it; and a verdict
+  that does not go stale leaves a green lamp above wording that has been
+  rewritten since, which in editing mode is the ordinary case rather than an
+  edge one. In the other direction a signature that takes in a re-tag puts
+  every lamp out for nothing, which is a lamp nobody bothers with. And on the
+  sheet: ask for the whole paper in one reply and it truncates into findings
+  that cannot be attributed to the question they belong to, re-read questions
+  whose verdict already stands and one press is forty calls instead of two,
+  and clear the bar's inline display instead of naming one and the summary
+  never appears at all on a run that otherwise worked perfectly. On the CREATE
+  page the same one failure has three more doors: let it read the editor's
+  fields while ✏️ editing mode has the whole paper in `blocks` and the lamp is
+  about no question that exists; check an EMPTY editor and it lights green,
+  because nothing is wrong with a question that has nothing in it; and let the
+  ＃ fix keep calling `cqNumberOptions` and it rewrites the bank behind an
+  author who has not pressed Save — or, on a draft, silently does nothing at
+  all. Rewrite `className` in the painter instead of swapping the state class
+  and every lamp keeps its colour and loses its shape.
+- After touching **📝 the per-part explanations** (`qPartsWithoutExplanation`,
+  `qSplitMultiPartExplanations`, `qEnsurePartExplanations`, `_partExplSection`,
+  `_partExplPrompt`, `aiWritePartExplanations`, `PART_EXPL_MAX`,
+  `_aiBuildFillPartExplanations`, step 2b in `processRapidJob`, or the
+  `EVERY PART GETS ONE` clause in `_partsPromptRules()`) — or **🖼 Draw this
+  explanation** (`XD_FIDELITY`, `_xdPrompt`, `_xdExplText`, `xdRunBlock`,
+  `_xdGoBlock`, `xdTouchUpBlock`, `_diagramDraw`, `_explKeyContentHtml`,
+  `_qExplanationDiagrams`) — run `node tools/part-explanation-tests.mjs`
+  **and `node tools/auto-diagram-tests.mjs`**, which pins the shared drawing
+  core the two diagrams now share. Every failure here is silent and the
+  question still builds, saves and prints. Let the filler overwrite instead of
+  fill and an author's own note — or the model's note for another part — is
+  quietly rewritten by the feature that exists to fill a hole. Let it reach 📖
+  or 📚 and a forty-question paper becomes forty lectures, which is the exact
+  fault the three depths undo. Fire it once per part and one paper is hundreds
+  of calls. Drop the free split and a call is paid for to write notes the model
+  had already written into one box. And on the picture side: lose `XD_FIDELITY`
+  and the button draws a generic picture "about heat" beside a note about
+  something else — which looks like a working feature and teaches the wrong
+  thing; draw from an EMPTY box and it is a picture of nothing; leave one print
+  path on the raw content and the key carries the diagram from one print button
+  and not the other; and render it anywhere but the post-marking card and a
+  diagram of the answer prints above the question that gives it away. The SIZE
+  (`XD_PRINT_MAX_PT`, `xdImgStyle`, `xdSizeStep`, `xdSizeAuto`, `imgScaleStep`,
+  `_qExplanationDiagrams`'s `{ url, style }`, and `.xd-size` in `EM_KEEP` /
+  `EM_NO_HOIST_IN`) fails the same way: let one of the three surfaces stop
+  reading the number and the author sizes the picture in the editor while the
+  key prints it at the old size; let a block with NO size render as anything
+  but what it always did and every diagram in the bank changes at once; let
+  Auto write a 0 instead of deleting the field and "no size chosen" means two
+  different things depending on who is asking; and let the print cap grow past
+  `XD_PRINT_MAX_PT` and a resized picture is the thing that breaks a sheet the
+  planner had already measured.
+- After touching **the table block** (`_tblInsertRow`, `_tblDeleteRow`,
+  `_tblInsertCol`, `_tblDeleteCol`, `_tblRemapCellKeys`, `_tblRemapRowKeys`,
+  `_tblCellCss`, `TABLE_STYLE_PRESETS`, `TABLE_FONTS`, `tableApplyStyle`,
+  `tableClearFormatting`, `tableDistribute`, the grips, or `_tblFromAi` /
+  `_tblAiCleanCell` / `tblBuildFromShot`), run
+  `node tools/table-editor-tests.mjs`. Every failure here is silent and the
+  table still renders: a remapper that forgets one of the four position-keyed
+  structures leaves the author's shading, padding, heights or merges one row
+  out on a screen that looks completely right; a merge shifted when it should
+  have GROWN tears a merged heading off the cells it covers; deleting rows from
+  the top down renumbers the list under itself and takes the wrong ones; and
+  letting the grip column into the colgroup mapping makes every resize handle
+  drag the column to its LEFT. On the reading side a spec that is not padded to
+  `cols` drops cells the renderer never asks for, an unfiltered cell string is
+  arbitrary HTML written into a contenteditable and printed onto a worksheet,
+  and a reply with no table returned as an empty table reads as a screenshot
+  that worked. `_tblCellCss` is the one both renderers share — a property added
+  to the editor's copy alone is a font the author sets on screen and the
+  worksheet prints without.
+- After touching **the level ladder** (`TOPIC_LEVELS`, `LEVEL_ORDER`,
+  `LEVEL_CODE_RE`, `LEVEL_MIN`/`LEVEL_MAX`, `isLevelCode`, `isSecondaryLevel`,
+  `getLevelNumber`, `levelFromNumber`, `levelOptionsHtml`, `audienceFor`,
+  `schoolFor`, the S1 rows in `topicLevelMap`/`topicsByLevel`/`levelColors`/
+  `topicEmojis`, or `fps.html`'s `LEVEL_ORDER`), run
+  `node tools/subject-level-tests.mjs` and `node tools/syllabus-tests.mjs`.
+  Every failure here is silent and the app renders perfectly either way: read
+  `'S1'` as a number and Secondary 1 sorts BELOW P3, so every Sec 1 question is
+  served to the youngest child in the school; put a `/^P[3-6]$/` back at a call
+  site and a Sec 1 student's assigned level is thrown away and they are quietly
+  capped at the default; pin `LEVEL_MAX` to `'P6'` and every Sec 1 question is
+  hidden from the whole school until somebody assigns levels one child at a
+  time; and let a prompt go on saying "primary-school" for an S1 question and
+  the AI writes P3 science into a question filed perfectly correctly at
+  Secondary 1. The one that reaches a CHILD is the opt-in gate: cap an
+  unassigned student at `LEVEL_MAX` instead of `LEVEL_DEFAULT_CAP`, or let a
+  family-declared / stale `servingLevel` secondary level through without the
+  teacher's own assignment behind it, and Secondary 1 science is served to a
+  nine-year-old on every surface at once — `fps.html` included, which reads the
+  bank directly and carries its own copy of the rule. Run an ADMIN through the
+  band — `qWithinStudentLevel` without its non-student early return — and the
+  entire primary bank disappears from the app, because `LEVEL_MAX` is secondary.
+  And build a level bucket
+  from a LITERAL rather than from `_emptyLevelBuckets()` and the authoring
+  prompt throws on the first S1 topic it meets, which surfaces to the author as
+  every page of their PDF failing to be read.
+- After touching **🧰 the bulk tools** (`qbulkList`, `qbulkVisible`,
+  `qbulkUnlit`, `qbulkOwned`, `qbulkRecency`, `qbulkLightPasses`,
+  `qbulkRenderBar`, `qbulkTallyHtml`, `qbulkCheck`, `qbulkTopicChoices`,
+  `aiPickTopic`, `qbulkTopicsOpen/Run/Undo`, `_qbtWrite`, `QBULK_*`, the light
+  filter in `_bankFilteredQuestions` / `_vetVisibleQuestions`, the `'vet'`
+  traffic-light scope or `tlFixVetOptions`), run
+  `node tools/bulk-topics-tests.mjs`. Everything here acts on a whole BATCH, so
+  every failure is silent and multiplied by forty. A scope that is not narrowed
+  to what the page is showing re-files questions the author never saw; a window
+  that reads `createdAt` on the vetting list means something different from what
+  the card beside it says; a retired topic left in the choices files questions
+  where no student can ever be served them; a `topic2` left behind keeps the
+  whole question at the old level while the primary topic looks perfectly right,
+  which is the re-file undone by the field nobody looked at; a model's invented
+  topic written as-is is a question filed under something that does not exist;
+  and a write that failed but moved the in-memory copy leaves the screen and the
+  database disagreeing. Drop `_wkSuppress` and forty housekeeping writes land in
+  somebody's work-session log as forty questions authored; leave the guard up
+  (no `finally`) and every later save in the session is silenced. On the 🚦 half:
+  count the tally AFTER the light chip and pressing 🔴 leaves a bar reading
+  "🔴 3" with no way back; give the vetting list a lamp without the `'vet'`
+  scope and every one of them sits grey for ever; and leave the ＃ fix on
+  `cqNumberOptions` and it reports "no options here" about a vetting question
+  that plainly has four. On the SECOND TOPIC: let one from a HIGHER year
+  through and it silently puts the whole question above the level the author
+  just asked for — the same fault the re-file exists to fix, arriving through
+  the field that fixes it; let another skill topic, an invented one or a
+  retired one through and the question is filed where nothing can find it; and
+  count a question whose primary was already right as "already right" and every
+  experiment question keeps its science nowhere in its filing, which is the
+  reported bug untouched.
+- After touching **🖨 Preview printed** (`_wsPreviewAdhoc` and its branches in
+  `_wsPreviewCtx` / `_wsShowPreviewOverlay` / `printFromPreview` /
+  `_wsPreviewSnapshot` / `_wsQeReopenPreview`, `previewQuestionsPrint`,
+  `previewOneQuestionPrint`, `qbulkPreviewPrint` or `printQuestionsDirect`), run
+  `node tools/bulk-topics-tests.mjs` and `node tools/preview-return-tests.mjs`.
+  The promise is that it is EXACTLY the PDF, so anything that forks the path
+  breaks it quietly: a renderer of its own drifts in the direction nobody
+  checks, and a printer of its own prints a different sheet from the one that
+  was previewed. Carry the set as ids and a vetting preview is empty (they are
+  not in the bank); carry the SNAPSHOT as objects and reopening after an edit
+  shows the copy that was just fixed; offer ✏️ Editing mode on a vetting set and
+  saving moves those questions into the bank; and leave one preview slot
+  uncleared and the button opens whatever was last previewed. From the EDITOR
+  (`previewEditorPrint`, `_wsPreviewIsDraft`, the `editor` source): skip the
+  sync and the preview is a keystroke behind; hand it `collectQuestionData()`'s
+  output and every table comes out empty; forget the deep copy and the preview
+  can write back into the question being edited; let it run in ✏️ editing mode
+  and it renders the whole paper as one question; and leave the ✏️ tools on and
+  a draft offers buttons that open a question the bank has never heard of.
+- After touching **🔗 the merge** (`qMergeQuestions`, `qMergeFixParts`,
+  `qMergeUniqueIds`, `qMergeLettersOk`, `qMergeLetterSources`,
+  `qMergePartPreview`, `QMERGE_MAX`, `_vetApplyMerge`, the `qm*` dialog, the
+  `continuation` clause in `_aiBuildQuestionPrompt`, `_aiQuestionPayloads`'s
+  `continuation`, `processRapidJob`'s return shape and its awaited writes,
+  `_rapidExpandPdf`'s `settle()`, `_bankApplyMerge`, `bankMergeSelected`,
+  `_bankMergeRepointWorksheets`, `deleteQuestionDocAwait` or the `qm*` dialog's
+  `_qmScope`), run `node tools/question-merge-tests.mjs`.
+  Every failure here is silent — the merged question renders, saves and prints
+  perfectly however badly it was stitched. Concatenate in the wrong order and
+  page 2 is printed above page 1; let two colliding block ids through and one
+  block silently wears the other's blanks and keywords; re-letter a sequence
+  that was already fine and every part of a question changes name for nothing;
+  fail to re-letter (a)(b)+(a)(b) and the answer key prints two "(a)" headings
+  with one of them silently keeping both answers; re-letter without stripping
+  first and the paper reads "(c) (b) Explain why…". On the PDF side: stitch
+  anywhere but `settle()` and "the page before this one" has no answer, because
+  pages are read in parallel; forget to clear the carry on a failed or blank
+  page and two unrelated questions are grafted together; and stop awaiting the
+  page's writes and the half that was merged away comes back on the next
+  sign-in, because the delete landed before the write did. On the BANK the same
+  fault costs more, because there is no bin to get it back from: let the delete
+  run before the save lands and both halves are gone for good; skip the
+  worksheet repoint and every saved sheet that used a merged-away question
+  silently reads "no longer in the bank", a sheet broken by a tidy-up that was
+  never made on it; and gate the student in the BUTTON rather than the handler
+  and the one page that both writes to the bank and deletes from it has no lock
+  at all.
+- After touching **📄 whole-PDF rapid add** (`RAPID_PDF_MAX_PAGES`,
+  `RAPID_PDF_PAR`, `rapidAddFiles`, `_rapidQueuePdf`, `_rapidPdfPump`,
+  `_rapidExpandPdf`, `_rapidPageFile`, `_pdfRenderPage`, `startRapidJob`'s PDF
+  turn-away, `processRapidJob`'s `blankOk`, or `_aiQuestionPayloads`), run
+  `node tools/rapid-pdf-tests.mjs`. Every failure is silent and questions still
+  land in vetting: send a PDF whole again and the paper comes back with every
+  figure missing and its last questions quietly truncated away; read the batch
+  level inside the render loop and the back half of a P3 paper is filed at P4
+  the moment the author moves the picker on; treat a blank page as a failure
+  and every cover sheet in the paper leaves a red card, which is what makes the
+  one real red card get clicked past; let every page fire at once and a
+  forty-page paper is forty simultaneous AI calls, whose rate-limit failures
+  read as "that PDF could not be read"; stop reading `questions` out of the
+  reply and four of the five questions on every page are thrown away, on a page
+  that still produces one perfectly good vetting card; and hold the whole-page
+  backup off a multi-question page and every question whose rectangle came back
+  unusable lands with an EMPTY picture slot — which is exactly the "Diagram
+  missing" this was reported for.
+- After touching **🪄 the command box in the question creator** (`QCMD_MAX_CHARS`,
+  `QCMD_NO_CHANGE_RE`, `qcmdNeedsRedraw`, `qcmdChangesFor`, `QCMD_DIAGRAM_RULES`,
+  `qcmdDiagramPrompt`, `qcmdDiagramPromptRules`, `qcmdSummary`,
+  `qcmdRedrawDiagram`, `qcmdRun`, `qcmdBuildVariant`, `qcmdLoadIntoEditor`, or
+  `_regenPrompt`'s `opts.images`), run
+  `node tools/ai-command-tests.mjs`. Every failure here is silent and the
+  question still comes back, renders and prints: line a change up against the
+  wrong picture and a figure nobody asked about is redrawn while the one that
+  had to change still shows the old numbers; read "none" or "N/A" as an
+  instruction and that word is painted into the figure; lose the reference
+  picture or the keep-it-the-same rules and the reply is a fresh drawing of
+  roughly the same thing in a different style; and let a failed redraw go quiet
+  and the question's wording and its figure disagree with nothing on any screen
+  to say so.
+- After touching **🎙️ transcription** (`AI_TRANSCRIBE_MODEL`,
+  `transcribeAudio`, `_transcribeModelGet`, `_transcribeClean`,
+  `TRANSCRIBE_PROMPT`, `transcribeRouteNote`, or any mic call site), record
+  something and check it comes back. Every failure here is silent in the one
+  direction that matters: a call site that goes back to `askGeminiVision`
+  still transcribes, so the mic keeps working and quietly stops using the
+  speech model — the words are simply a little worse, and nothing anywhere
+  says which model wrote them. Lose the fallback and a model id renamed under
+  us is a 400 on every recording, which reads as "the mic is broken"; lose the
+  down-mark and every recording pays for the same refusal; and send a
+  `thinkingConfig` to a speech model and it is a 400 rather than a worse
+  answer. The census exemption is the other half: a transcriber grounded in
+  the marking standards writes down the answer somebody wanted rather than
+  the one that was spoken.
+- After touching **📄 paragraph spacing** (`_nlToBrHtml`, `_keepParagraphGaps`,
+  `escapeHtmlKeepLines`, or the **AUTHORED PARAGRAPHS KEEP THEIR SPACING**
+  rules in `index.html`), run `node tools/paragraph-spacing-tests.mjs`. Every
+  failure is silent and the question still reads — only the shape the author
+  gave it is gone, and screen and paper go back to disagreeing about it. Drop
+  the blank lines again and a two-paragraph explanation prints as one block;
+  treat `<br>` and `</p>` alike and either every line break becomes a paragraph
+  or every paragraph becomes a line break; let `</li>` open a gap and an inline
+  option list stops reading as a list; keep the markup's own trailing break and
+  every text block on the sheet is padded at the bottom. The CSS half is
+  quieter still: it is scoped to the containers that render authored html, so a
+  container added later is the one that silently keeps running its paragraphs
+  together.
+- After touching **📝 the explanation depth rule** (`EXPL_ASKS_RE`,
+  `_aiAsksToExplain`, `_explAnswerContext`, `_explDepthRules`,
+  `EXPL_POINTS` / `EXPL_TAIL_MORE` / `EXPL_TAIL_FULL` / `EXPL_TOKENS`,
+  `aiExplainBtnHtml`'s three buttons and their three listeners,
+  `aiGenerateBlockExplanation`'s `level`, or the
+  `AN EXPLANATION IS NOT THE ANSWER AGAIN` line in `_partsPromptRules()`), run
+  `node tools/explanation-depth-tests.mjs`. Every failure is silent and the
+  block still fills: lose the rule and a question that says "Explain your
+  answer" gets its own model answer written into the explanation box, so the
+  printed key says the same thing twice and the teacher only finds out reading
+  it. Let the DEFAULT reach the four-point lecture — a stray level, a build path
+  passing one, an unknown level falling through to it — and every question on
+  the sheet gets a page of commentary instead of a note, which is the fault the
+  three depths were added to undo. Fire it when there is NO answer yet and the box comes back refusing to
+  say what the answer is, because it has been told not to repeat one that was
+  never written. Count another PART's answer or another part's "Explain your
+  answer" and the strongest wording lands on a box that had nothing to repeat.
+  And leave it out of `_partsPromptRules()` and ⚡ Rapid add goes on writing
+  duplicates by the pageful while the editor button quietly does the right
+  thing.
+- After touching **🔲 the printed blank** (`_fbMergeBlankRuns`, `_fbSegments`,
+  `FB_PRINT_SLOT_PT`, `FB_SLOT_CH`, `_fbPrintHtml`, `_fbAnswerKeyText`,
+  `_fbPreviewHtml`, `_fbReadonlyHtml`, or `buildOpenBody`'s `fillblank` case),
+  run `node tools/fill-blank-tests.mjs` **and
+  `node tools/keyword-blank-tests.mjs`**, which cuts the two width constants
+  straight out of `app.js` so the 🔑 practice mode's boxes cannot drift from
+  the block's. Every failure is silent and the sheet
+  still prints: stop merging a run of blanks and two rules in a row tell the
+  class the answer is two words, start merging across a comma and a whole
+  answer disappears off the paper and off the key at once, and let a rule size
+  itself from an answer again — its own, or the longest in its block — and
+  "oxygen" beside "carbon dioxide" is legible before either is written.
+  `_fbParse` merging is the worst of them — in the language portals it welds one editing item's correction onto the next
+  one's misspelling, on a passage that still reads perfectly.
+- After touching **✏️ editing mode** (`emScope`, `emOwnerQuestion`,
+  `emTitleFor`/`emTopicFor`, `emAdoptOwners`, `emSigOf`, `emChangedEntries`,
+  `emKwFor`/`emBlanksFor`, `emMayRemove`, `emRemoveQuestion`, `emDropQuestion`,
+  `emDropIsSaved`/`emDropLabel`/`emDropTip`, `emRailDelete`, `emCondenseCard`,
+  `emIconify`, `emHoistInto`, `EM_PRIMARY`, `_ppGo`, or `renderBlocks`'s
+  `emAfterRender` hook) — **or ANY per-block AI button**
+  (`aiGenerateBlockAnswer`, `aiGenerateBlockExplanation`, `annotAnsWriteKey`,
+  `_akdEditorQuestion`, `_widgetQuestionContext`, or a new one) — run
+  `node tools/editing-mode-tests.mjs`. Editing mode puts EVERY
+  question of a sheet into the one block editor at once, which is what makes it
+  useful and also what makes every failure here silent — the editor still
+  renders, still types and still saves, and is quietly working on the wrong
+  question. A panel that folds when a rail icon opens it — the 🔑 keyword
+  chips — is a button that lights up and does nothing, and a self-contained
+  panel's buttons lifted onto the rail are that panel gutted and a second 🗑
+  beside the block's own. `emScope` handing back the whole array makes `qPartMap` inherit part
+  (c) of question 3 into every block of question 4 and sends the 🤖 AI answer
+  button the entire paper as one question; a block id repeated across two
+  questions is typing into question 7 and watching question 2 change; a
+  signature that reports everything as changed turns one edit into forty writes
+  and one that reports nothing turns Save into a button that does nothing; and a
+  question allowed to empty itself has nowhere to draw its heading and nothing
+  to own the next block inserted into it. The one failure that DOES show is the
+  rail: a button lifted out of its `[data-mic-wrap]` dictates into nothing. The
+  two deletes fail quietly in their own ways: a ✕ that leaves the scroll and not
+  the worksheet is a removal the teacher watched happen and that never happened,
+  one that persists on a PAST PAPER writes to a list the paper does not have,
+  and either of them leaving stray blocks, owner entries or keywords behind
+  poisons the next block given one of those ids. And a per-block AI button that
+  reads the global `blocks` sends the model the WHOLE PAPER — which is the one
+  failure here that reaches a printed answer key: the box fills with a fluent,
+  well-written model answer to a completely different question, and nothing
+  anywhere says so. That is what the two CENSUSES at the end of that harness
+  exist to catch on the next button, not the last one.
+- After touching **↩️ back to the preview you came from** (`_wsPreviewSnapshot`,
+  `_wsQeReopenPreview`, `wsQuickEditOpenFull`, `_wsQeReturn`,
+  `_afterEditNavigate`, `_syncBackToPapersBtn`, or `ppPreview`'s `quiet`), run
+  `node tools/preview-return-tests.mjs`. Every failure is silent — the question
+  saves, the toast says so, and the teacher simply ends up somewhere they did
+  not ask to be. A snapshot taken after `closeWorksheetPreview()` is always
+  null, so the return quietly stops working while the edit itself behaves
+  perfectly; a snapshot `editQuestion` forgets to clear sends a later,
+  unrelated edit to a sheet nobody opened; and reopening on the DESTINATION
+  rather than the snapshot's kind confuses the paper preview with the Past
+  Papers page, which both land on `papers`.
+- After touching **the printed part label** (`PRINT_PART_PAD_*`,
+  `printPartPadPt`, `printPartBlockHtml`, or the
+  `.print-text-block.print-has-part` rules), print a question with parts and
+  LOOK at the page. Both directions are silent and nothing throws: too little
+  reserve and the marker prints on top of the first words of its own question,
+  too much and the label eats the column the question is set in. And the two
+  numbers — the block's `padding-left` and the label's `width` — must keep
+  coming from the one call, or they drift apart and the overlap comes back on
+  whichever surface was not looked at.
+- After touching **⚡ the authoring engine** (`AI_AUTHOR_DEFAULT`,
+  `AI_AUTHOR_FOLLOW`, `aiAuthorSetting`, `aiAuthorEngine`, `_aiAuthorFromDoc`,
+  `aiEngineOrder`'s `task`, the `authoring` option on `askGemini` /
+  `askGeminiVision`, `aiEngineAuthorPreview`, or any call site that passes
+  it), run `node tools/ai-routes-tests.mjs`. Both directions are silent and
+  cost real money in opposite ways: a build path that stops passing the flag
+  goes back to the centre-wide engine while the dialog still promises ChatGPT
+  — which is the reported fault, a bill that does not move — and the flag
+  spreading to a marking, hint or report call puts thirty students on the paid
+  engine with nothing on any screen to say it happened. That is what the
+  census at the foot of that harness exists to catch on the NEXT call site
+  rather than the last one. And `skipOpenAi` must keep OUTRANKING it, or the
+  cross-check's Gemini column is answered by the engine it exists to compare
+  against.
+- After touching **the AI routes** (`aiEngineOrder`, `askOpenAiServer`,
+  `askChatGpt`, `_aiRun`, `_aiAsk`, `askGeminiDirect`, `AI_DOWN_MS`, `_aiWhy`,
+  `aiRouteReport`, `renderAiEngineStatus`, `aiEngineChoicePreview`, or
+  `askGemini` / `askGeminiVision`'s wrappers) — **or the `askOpenAi` function
+  in `polymathlc/math/functions`, which is the other half of it** — run
+  `node tools/ai-routes-tests.mjs`. Every failure is silent and the app looks
+  exactly as it did the morning the spending cap was hit. The server route
+  dropping out of the order is the whole feature reverting: a key in
+  localStorage rescues the teacher's laptop and no student's phone, so it
+  looks healthy to the one person who would notice and to nobody else. A
+  one-way fallback leaves the failure that actually happens with nothing
+  behind it. A "down" note that never clears makes the second route
+  permanent, and one that takes a route OFF the list leaves the app dead once
+  the cap has been lifted. And the second error reported instead of the first
+  tells the teacher "no key on this device" about a paper that hit a billing
+  cap. And `askChatGpt` filtered to "not Gemini" rather than to ChatGPT's own
+  routes puts Kimi in the cross-check's ChatGPT column, which reads as two
+  engines agreeing and is one engine agreeing with itself.
+- After touching **📷 a question that came off a photograph** (`SCANNED_SOURCE`,
+  `_vetIsScanned`, `SCANNED_CARD_BORDER`, `SCANNED_CARD_BADGE`, or the
+  `restBorder` ranking in `renderVettingList`), run
+  `node tools/scanned-question-tests.mjs`. One word — `source: 'scan'` — is the
+  whole contract with `polymathlc/scan`, and every way it goes wrong is silent:
+  rename the value and the card still arrives, still renders and still approves,
+  it simply stops being purple and stops saying it came off a photograph. A
+  scanned question has no diagram and no topic, so a card that looks like every
+  other draft is approved at the same speed as one somebody typed and checked —
+  and reaches the bank with the figure missing. The ranking is the other half:
+  purple must beat "just added" and lose to the red of a card ticked for
+  deletion, or the author cannot see what they are about to delete.
+- After touching **(b)(i) roman sub-parts** (`QPART_ROMANS`, `qSubNormalize`,
+  `qPartKey`, `qPartLetterOf`, `qPartSubOf`, `qPartKeyIn`, `qPartNormalize`,
+  `qPartLabel`, `qPartMap`, `qBlockOpensSub`, `qBlockOpensKey`,
+  `_qSubOwnMarker`, `setBlockSubPart`), run `node tools/sub-part-tests.mjs`
+  **and** `node tools/part-marker-tests.mjs`. Every failure is silent: a
+  sub-part that stops inheriting its letter leaves a renumbered question
+  pointing at the old one; a new letter that inherits the last sub-part files
+  everything under (c) as (c)(ii); `qBlockOpensPart` returning a KEY makes the
+  exam paper builder, autoNumberParts and the Doctor match nothing at all; and
+  a letter that stops covering its own sub-parts drops the marking scheme's
+  answer for part (b) on the floor.
+- After touching **the paginated answer key or the past-paper preview**
+  (`_packAkRows`, `_akPageTitle`, `_printAkPageEl`, `_printPlanAkPages`,
+  `plan.akPlans`, `_wsPreviewPaper`, `ppPreview`, `_ppPrintQuestions`, or
+  `_akSectionsHtml`'s `kind`), run
+  `node tools/answer-key-pagination-tests.mjs`. The key is the page a teacher
+  marks from and every failure lands on paper: charge the heading to one sheet
+  instead of all of them and sheet two prints over the bar; drop the row-order
+  restore and the live preview rebuilds from a shuffled DOM, putting every
+  answer under the wrong question number; let either consumer stop calling
+  `_printAkPageEl` and the preview paginates differently from the PDF, so the
+  teacher checks a layout they will not get.
+- After touching **[2] question marks** (`qMarksOf`, `qMarksLabel`,
+  `qStripTailMarks`, `qMarksAppendHtml`, `QMARKS_TAIL_RE`,
+  `QMARKS_TAIL_POS_RE`, `qPartBodyHtml`, `qMarksPickerHtml`, `setBlockMarks`,
+  `commitBlockMarks`), run `node tools/question-marks-tests.mjs`. Every failure
+  is silent and lands on a printed sheet in front of a class: a marker appended
+  to the END of the string instead of inside the last tag puts the marks on a
+  line of their own on every question at once; a marker left in the wording as
+  well as in the field prints "… at point A. [2] [2]"; a strip that reaches
+  past the end of the wording deletes "[see Diagram 1]" out of the middle of a
+  question; and a block with NO marks that does not render byte for byte what
+  it always did changes the whole bank at once.
+- After touching **✏️ the answer key edited from the preview** (`_akeRows`,
+  `_akeHasAnswer`, `_akeNewExplanation`, `_akeKey` / `_akeSplitKey`,
+  `_akeSyncFromDom`, `akeSave`, `AKX_SWITCHES` / `akxPrintOn`, or either print
+  path's `case 'explanation'`), run `node tools/answer-key-edit-tests.mjs`.
+  This is the page a teacher marks thirty scripts from, so every failure is met
+  in front of a class and none of them throws. A field the KEY prints and the
+  drawer does not offer is a wrong answer nobody can fix from the place they
+  noticed it; a field the drawer offers and the key does not print is worse — it
+  is edited, saved, and the sheet comes off the printer unchanged. An
+  explanation added with no part on a question that HAS parts silently reads as
+  explaining the last one. And the box key split on the FIRST separator instead
+  of the last writes an imported block's answer onto a field that does not
+  exist, so the edit simply vanishes on save.
+- After touching **🔑 keywords / 🔲 fill-in-the-blanks** (`_kwParse`, `kwIndices`,
+  `qKwIndices`, `qKeywordWords`, `qHasKeywords`, `kwBoldPlain`, `kwBoldHtml`,
+  `qKeyFieldHtml`, `qKeyPlainHtml`, `kwBlankFieldHtml`, `kwPreviewFieldHtml`,
+  `_kwFibBlockHtml`, `qpSetMode`, `editorKeywords`, or `_markedToBlanks`), run
+  `node tools/keyword-blank-tests.mjs`. Every failure is silent and the app goes
+  on working. **Reading `q.blanks` as keywords** is the one that has already
+  happened: it hands every AI-built question in the bank a set of words the
+  teacher never chose and a practice mode they never asked for, and it looks
+  from the inside like the feature working unusually well. A word count that
+  drifts by ONE slides every keyword along its sentence — the mode then blanks
+  "the" and the printed key underlines "of", and nothing anywhere says so.
+  Splicing the bolding front to back instead of back to front prints mangled
+  markup in the middle of a teacher's answer key. And a blank renderer that
+  returns an empty string rather than null takes the answer box off the question
+  and puts nothing in its place: a question that renders perfectly and cannot be
+  answered.
+- After touching **🧠 the corrections loop** (`styleBlock`, `styleLessons`,
+  `styleRecentEdits`, `styleHarvestQuestion`, `styleNoteGenerated`,
+  `_styleEditRatio`, `STYLE_FIELDS`, `STYLE_NOTE_SYS`, `styleWriteNotes`,
+  `styleSave`, `loadAnswerStyle` / `stopAnswerStyle`, `styleLearnedHtml`, or
+  `aiGrounding`'s `+ style`), run `node tools/answer-learning-tests.mjs`. The
+  failures here are of two kinds and both are silent. The loop quietly not
+  running is the complaint this feature answers arriving through its own fix: a
+  correction reaches no prompt, so the app makes the same mistake on the very
+  next answer while the panel says it was learned. The other is worse — a
+  correction reaching a prompt that must never see one: MARKING handed the
+  answer starts marking a child on whether they used the teacher's wording, the
+  CHECKER told what phrasing is preferred flags correct answers for wording,
+  and question AUTHORING is where the source document wins. Let a punctuation
+  tidy-up count as a rewrite and the corpus fills with lessons that have none in
+  them; stop superseding the same box and it keeps the halfway version for ever;
+  batch the lesson calls and one lands on the wrong correction, reading
+  perfectly and teaching something nobody said; and let an employee harvest and
+  the whole centre's answers are rewritten by somebody hired to type questions.
+- After touching **the grounding one door, the note budgets or the census**
+  (`aiGrounding`, `_notesFairShare`, `_notesField`, `_notesDedupe`,
+  `_notesTrimTo`, `_notesLedger` / `notesLedgerFor` / `notesLedgerCounts`,
+  `NOTES_GUIDE_CHARS` and the other pots, `_notesCheckBlock`,
+  `_notesTeachBlock`, or `UNGROUNDED_BY_DESIGN` in the harness), run
+  `node tools/teaching-notes-tests.mjs`. Every failure is silent and the app
+  answers fluently either way. Turn a pot back into a `.slice()` over the
+  joined notes and the teacher's SECOND standing instruction reaches no prompt
+  at all while sitting on the page looking obeyed — the reported bug, exactly.
+  Let `'mark'` see the key facts and the marker has been handed the answer.
+  Degrade an unknown kind to `'answer'` rather than `'mark'` and one typo does
+  the same. Let `'check'` carry the answer digest's "base the wording on this
+  database FIRST" and the cross-check starts condemning correct answers for
+  their wording, which reads as a clean bill of health inverted. And a call
+  site added without grounding is the whole feature quietly reverting on one
+  screen — which is what the census exists to make loud.
+- After touching **the teaching-notes digests or the live notebook** (`_notesGuidanceBlock`,
+  `_notesMarkingBlock`, `_notesGenBlock`, `_notesAnswerBlock`, `_notesFor`, `_noteSuitsThisApp`,
+  `loadTeachingNotes`, `_notesDetach`, `stopTeachingNotes`, `NOTES_GUIDE_CHARS`, `quickNoteSave`,
+  `_noteSourceLabel`, `notesCardHtml`), run
+  `node tools/teaching-notes-tests.mjs`. Every failure here is silent: a digest that comes back
+  without the teacher's standing instruction is an ungrounded prompt, so the AI still builds the
+  question, still writes the answer and still marks the student — in its own voice instead of
+  theirs, with nothing anywhere saying so. Two of them are worse than that. Filtering `guidance` by
+  topic looks perfectly reasonable and quietly makes a HOUSE RULE apply to some questions and not
+  others; and a digest that bails out before the guidance when there are no keywords to report
+  ignores a teacher who has typed a rule and uploaded nothing else at all. The notebook is shared
+  with `polymathlc/anskey` and `polymathlc/scan`, so a field that stops being read here goes on
+  being written there — the version of this bug that is invisible from both sides. The harness also
+  pins the two rules that make the sharing real: a general note applying ALONGSIDE the topic match
+  rather than only when nothing matched (which is how every note those apps write arrives), and a
+  maths-only note staying out of a science prompt whatever else it carries.
+- After touching **the siege squad** (`EMS_SQUAD_PER_ROLE`, `emsSquadClean`,
+  `emsSquadDefault`, `emsSquadSaved`, `emsSquadStore`, `emsRenderDeck`'s squad
+  read, or the `squad` field in `tcgHydrateState`'s `siege` literal), run
+  `node tools/siege-squad-tests.mjs`. Every failure is silent and lands on a
+  student mid-game: lose the per-role cap and a squad is eighteen attackers and
+  no healer, lose the ownership test and a merged-away monster sits on the bench
+  costing mana and summoning nothing, and lose either the deck read or the save
+  field and the pick screen is decoration — the choice is made, confirmed, and
+  then ignored by the battlefield or forgotten by the next run. An EMPTY squad
+  is the worst of them: the deck column is the only way to summon anything, so
+  the game renders perfectly and cannot be played.
+- After touching **🩷 the pink wall** (`_tcgScreenCut`, `_tcgTryScreens`,
+  `_screenSubjectKept`, `_tcgCutBackdrop`, `_tcgSlotStandsOnNothing`,
+  `_tcgLiveIndex`, `_tcgLiveClean`, `_tcgLiveImg`, `_tcgLiveWatch`,
+  `tcgKeyArtImgs`, `TCG_SCREEN_EDGES_MIN`, `TCG_SCREEN_RING_SEEN_MIN`,
+  `TCG_SCREEN_SUBJECT_MIN`), run `node tools/pink-screen-tests.mjs` **and**
+  `node tools/chroma-key-tests.mjs`. Every failure here is silent and lands on
+  every game surface at once: too timid and 206 avatars and portraits stand on
+  a bright magenta wall in front of the whole school; too eager and a violet
+  monster shot on a magenta screen is dissolved instead, which nothing on
+  screen reports and which no test but `_screenSubjectKept` can see. The
+  two-clean-edges refusal and the already-a-cut-out refusal are the boundaries
+  that keep the relaxed ring rule from becoming a licence, and the display
+  index dropping a url that serves BOTH an avatar slot and a card-art slot is
+  what stops a card face having its painted scene cut off it.
+- After touching **the bundled Realm of Embers art** (`tcgBundledArtPath`,
+  `tcgBundledArt`, `tcgSlotArt`, `tcgSlotHasArt`, `tcgBundledSlotIds`,
+  `TCG_BUNDLED_HEROES`, `TCG_BUNDLED_FX_DIR`, `_tcgSlug`), or after renaming a
+  card, moving a file under `assets/realm-of-embers/` or adding a set, run
+  `node tools/bundled-art-tests.mjs`. Every failure here is silent in the app
+  and expensive: a derived path that misses is an `<img>` that 404s and a
+  monster that falls back to its emoji — no error, nothing in the console a
+  student could report, and the game looking unfinished for everybody at once.
+  The harness also pins the half nothing else can: that an **override still
+  wins**. The bundled layer is a floor, never a ceiling, and a resolver that
+  got that backwards would make every picture an admin has ever drawn
+  invisible while the game carried on looking perfectly fine.
+- After touching **`tools/key-realm-sprites.mjs`**, re-run it (`--check` first)
+  and look at `assets/realm-of-embers/previews/keyed-sprites-qa.png` before
+  committing. It rewrites 206 sprites in place, both directions are quiet, and
+  the checkerboard is what makes them visible: key too little and a monster
+  walks onto the battlefield in a magenta box; key too much and a hole is
+  punched clean through it. And a detector that counts transparency as evidence
+  of a wall turns the tool into one that eats the artwork on its SECOND run —
+  which is the run nobody watches.
+  - **Its first run hollowed out four sprites and called all four a success**
+    (v1.307.0): the dream moth, the owl sage, the mindrender and the psywhisker
+    are VIOLET monsters shot on a MAGENTA wall, so `_screenDn` scored their
+    bodies as wall. Nothing it checked could see it — the "lost" test counts
+    only pixels the wall never touched (their bodies were screenish, so they
+    were not counted), and the "is the wall gone" test was satisfied *because*
+    the monster went with it. It now also runs the app's own
+    `_screenSubjectKept`. The 32 same-hue battle avatars then take a build-only
+    sampled-RGB fallback: the real border colour is keyed, detached plate
+    fragments are discarded, and the largest connected character is retained.
+    Its looser 35% survival floor applies only after the 72% broad-key guard has
+    failed and is paired with the ordinary minimum-area and leftover-screen
+    checks. A refusal remains non-destructive and leaves the source untouched.
+- After touching **⏳ Still loading** (`imgWaitBarHtml`, `imgWaitStart`,
+  `_imgWaitPaint`, `_imgWaitDone`, `_imgWaitImages`, `imgWaitRetry`,
+  `imgWaitStop`, `_scheduleImgWait`, `IMG_WAIT_*`) or **`_qAnswerDiagrams`**,
+  run `node tools/auto-diagram-tests.mjs`. A loading bar is only worth having
+  while it is honest, and every way it goes wrong is worse than not having it:
+  a fill driven by elapsed time is a bar that lies about how far it has got; a
+  bar that never appears leaves the gap unexplained, which is the original
+  problem; and a bar that never LEAVES — because a failed picture is still
+  being waited on, or a re-render left a second watcher behind — tells a
+  student a question is still coming when it has already arrived. On the other
+  side, `_qAnswerDiagrams` reaching anywhere but the post-marking card prints
+  the answer above the question.
+- After touching **🖼 Auto diagram** or the **🎨 Photo Editor** (`_akdPrompt`,
+  `AKD_PRINT_RULES`, `_akdAnswerText`, `_akdMake`, `akdRunQuestion`,
+  `akdRunBlock`, `_peOpen`, `pePickFiles`, `_pePaste`, `peDownloadName`,
+  `annotDownloadPng`, `applyAnnotTool`'s target branches, or `_annotOpenSrc`'s
+  target/cap handling), run `node tools/auto-diagram-tests.mjs`. Both features
+  hang off ONE editor and ONE picture slot, and every way they go wrong is
+  quiet: a fresh draw that stops asking destroys a scan that may be the only
+  copy of it; a prompt that stops asking for flat black-on-white line-work
+  returns a shaded render that looks fine on screen and is unreadable at 60mm
+  in grey; the two reference pictures swapped makes 🔄 Regenerate start from
+  scratch every time, which reads as the instructions being ignored; a target
+  with no branch in `applyAnnotTool` writes an answer-key diagram into a
+  question's picture instead; and a Photo Editor that is not admin-gated in
+  `navigateTo` is a page a hidden nav item does not actually close.
+- After touching **🔎 Why not this one** (`_wnyOpts`, `_wnyUsable`,
+  `_wnyNormItems`, `_wnyKeyRows`, `_wnyPrintJobs`, `wnyArm`, `wnyPrepare`,
+  `_mcqPaintResult`, or `_pushBlockAnswerKey`'s `why` argument), run
+  `node tools/why-not-tests.mjs`. This one tells a child something about a
+  question they have just got wrong and prints it on the sheet a teacher marks
+  from, so every failure states something untrue, confidently, on a page that
+  looks perfectly right: a reason lined up against the wrong option reads
+  exactly as well as it does against the right one and teaches the opposite of
+  the truth; the correct option appearing among "why the other options are
+  wrong" is the key contradicting itself two lines below the answer it just
+  gave; the badge armed before marking points straight at the answer, since it
+  only ever goes on the WRONG options; and `_wnyOpts` drifting apart for a
+  block and a marking-store entry silently splits one generator into two, so
+  the student reads one sentence, the teacher marks from another, and every
+  print re-bills the AI.
+- After touching **🛟 art safety & recovery** (`tcgArtBackupSync`,
+  `tcgArtRestoreBackup`, `tcgArtExport`, `tcgArtImport`, `_tcgArtWriteMany`,
+  `_tcgRescueSlotSequence`, `_tcgRescueRelay`, `tcgArtRescueApply`,
+  `_tcgArtLoadFailed`), run `node tools/art-safety-tests.mjs`. This protects the
+  one document that decides what every picture in the game is, and it has
+  already been lost once. Every failure here is silent and each turns a safety
+  net into a hazard: a backup that mirrors a wipe destroys the last good copy at
+  the exact moment it is needed, a failed read mistaken for an empty store
+  invites a redraw of artwork that was never gone, a restore or a rescue that
+  overwrites rather than fills gaps destroys the work it was run to save, and a
+  rescue proposal laid on out of step files every picture under the wrong
+  monster while looking exactly like a successful recovery.
+- After touching **the Student Usage Tracker** (`USAGE_MODES`, `usageMode`,
+  `sutCredit`, `sutVerdict`, `sutQuestionMeta`, `sutVisible`, `sutByMode`,
+  `sutExportCsv`, `sutOverrideOf`, `sutAnswerRowsHtml`, `sutOverrideHtml`,
+  `sutSaveOverride`, `_attemptAnswers`) or **`logGameAttempt` / `SD_GAME_MODES`**, run
+  `node tools/usage-tracker-tests.mjs`. Every failure here is silent and a
+  teacher acts on it: a mode that falls out of the log is a child's work made
+  invisible, a verdict threshold that drifts from the app-wide 0.95 makes the
+  tracker and the progress counters disagree about the same answer with nothing
+  to say which is lying, and an export that reads a different window from the
+  table it came from sends a parent a report of work in a mode the teacher had
+  filtered away. The answer panel is the only place a teacher can check the
+  AI's marking, so a part shown against the wrong label, the expected answer
+  printed as the student's, or an empty panel with no explanation each turn
+  "read what they wrote" into something nobody trusts twice — and an override
+  honoured in the row but not in the average is the dashboard quietly
+  disagreeing with itself on the one row somebody looked at closely.
+- After touching **the crop's pixel passes** (`_inkThreshold`, `INK_RATIO`,
+  `_expandRectToWhitespace`, `_trimEdgeTextLines`, **`_trimBlankEdges`**,
+  `EDGE_INK_MIN` / `EDGE_INK_FRAC` / `EDGE_SPECK_RUN`, `MAXRUN_FRAC`,
+  `RUNS_MIN`, `RULE_FRAC`, `RULE_GROUPS`, or the pass ORDER in
+  `_cropBoxFromScreenshot`) or **`_rectangleRules()`**, run
+  **`node tools/crop-tighten-tests.mjs`** and check a crop of a
+  photographed page as well as of a screenshot. Every failure here is silent and
+  the question is still built: a fixed ink level is right on a screenshot and
+  reads a whole PHOTOGRAPH as ink, so both passes find one band and stand down on
+  every phone picture ⚡ Rapid add takes — the crop back to whatever rectangle the
+  model drew, with nothing on screen to say so. In the other direction a trimmer
+  that cannot see a long stroke takes the top row off a table, the axis labels off
+  a graph and the caption off the picture it names, and all three look like a
+  perfectly successful crop. Take the pull-in back to VERTICAL only — or put a
+  second copy of it back at the foot of `_trimEdgeTextLines` — and every figure
+  in the app sits in a band of blank paper again, which is the fault this
+  version fixed and which nothing on any screen reports; run the sentence trim
+  BEFORE the sides are in and its width fractions describe the paper rather than
+  the figure, so a line of question wording rides along on the picture; drop the
+  speck guard and one dust mote or one JPEG ring stops the pull-in dead on
+  exactly the photographs it exists for; and crop blank paper instead of
+  returning `null` and a white rectangle is filed looking exactly like a figure
+  nobody has cropped yet. The same block is in `polymathlc/english`,
+  `polymathlc/chinese` and `polymathlc/math` — ship a change to all four together.
+- After touching **🧻 Clean paper** (`PAPER_*`, `_paperWhitePoint`,
+  `_paperCleanPixels`, `_paperCleanDataUrl`, `generateCleanEnhancedImage`,
+  `annotCleanPaper`), run `node tools/paper-clean-tests.mjs`. Both directions
+  are silent and both are found in front of a class: too timid and every
+  diagram keeps the weave an image model's decoder left on it, which is
+  invisible on screen and prints as a striped grey wash; too greedy and the
+  pass reaches past the background into the drawing, flattening a pale blue
+  water fill, a grey shading or a photograph's highlights to blank white — and
+  the picture still looks perfectly clean, so the damage is only visible
+  against an original nobody kept.
+- After touching **the printed MCQ answer box** (`_printMcqBlockHtml`,
+  `_printMcqAnswerBoxHtml`, either print path's `case 'mcq'`, the
+  `.print-mcq-answer*` print CSS), run `node tools/print-mcq-box-tests.mjs`.
+  Every failure here is found in front of a class rather than at a keyboard,
+  and the worst of them is silent: the two print paths drifting apart, so the
+  box prints from one button and not from the other. Taking the MCQ out of the
+  `default` branch also takes it away from `_pushBlockAnswerKey`, which the
+  harness pins — a key that drops every MCQ prints perfectly and looks tidy.
+- After touching **✍️ AI complete** (`completeBtnHtml`, `_aicTrimEcho`,
+  `_aicJoin`, `_aicUnquote`, `_aicWords`, `_aicAppendInto`, `_aicPrompt`, or
+  ✨ Improve's `complete-btn` guard), run `node tools/ai-complete-tests.mjs`.
+  Every failure is silent and lands in the middle of writing somebody was part
+  way through: trim too eagerly and the real continuation is thrown away or
+  starts halfway through a word, too timidly and the author's own opening is in
+  the box twice, and lose ✨ Improve's guard and one press of ✍️ AI complete also
+  runs the button that REWRITES the box.
+- After touching **the clone stamp's live preview** (`_annotClonePeekSrc`,
+  `_annotUpdateClonePeek`, `ANNOT_PEEK_MIN`, `_annotUpdateBrushRing`), run
+  `node tools/clone-preview-tests.mjs`. A preview that does not appear is
+  obvious the first time anyone picks the tool; a preview centred on the WRONG
+  source point looks exactly like a working one and aims every stamp a little
+  way off — which is worse than the pin-and-guess it replaced.
+- After editing `app.js`, validate it: `cp app.js /tmp/c.mjs && node --check /tmp/c.mjs` (the `.mjs` copy makes Node parse it as a module, so `import` at the top is accepted).
+- **The Gemini model is `AI_MODEL` and its thinking floor is `AI_THINK_MIN`, and the two move TOGETHER** (v1.289.0). Every model has its own thinking scale and a level it does not know is a **400 INVALID_ARGUMENT on every single AI call in the app** — not a degraded answer, no answer at all. `gemini-3.8-flash` (September 2026) takes `low` / `medium` / `high` — `medium` is its own default — and, like 3.7 before it, **rejects the `"minimal"` 3.6 accepted**, exactly as 3.x had already dropped 2.x's numeric `thinkingBudget`. So the floor is a named constant used at every call site rather than a string typed out in six places, and swapping the model means checking its scale first. The same pair lives in `fractions.html`, `math.html`, `video-review.html` and `bar-model.html` — each has its own copy, so a model change is five files, and `polymathlc/english`, `polymathlc/anskey` and `polymathlc/math` carry the same stack again.
+- After touching **the subject switcher** (`SUBJECT_APPS`, `SUBJECT_KEY`,
+  `subject*`) or **⚡ Rapid add's batch level** (`rapidLevel`, `setRapidLevel`,
+  `_rapidApplyLevel`, `_rapidLevelOptions`, `_aiBuildQuestionPrompt`'s
+  `levelHint`), run `node tools/subject-level-tests.mjs`. A url pointing at the
+  wrong folder does not error, it loads the WRONG subject's app, and
+  `../science/` is a 404 for the whole school (the folder is `cer`). An
+  absolute url is the same failure delayed until the centre moves domain. And
+  the batch level has no field to check itself against — a level is read off
+  the TOPIC here, so if the narrowing stops working the picker still says
+  "filed at P5", the toast still says "at P5", and forty questions land
+  wherever the AI's topic put them.
+- After touching **Ember Duel's sound or screen shake** (`DUEL_HIT_TIERS`, `DUEL_HEAL_TIERS`, `DUEL_CUES`, `DUEL_SYNTHS`, `duelSfxFlush`, `duelSfxPlay`, `duelSfxCue`, `duelQuake`), run `node tools/duel-sfx-tests.mjs`. It loads the REAL sound section out of `app.js` against a Web Audio shim and pins the ladder (every tier louder / deeper / longer / shaking harder than the one below), the one-beat-per-flush rule, the lunge delay, the routine cues staying under the blows, the draw riffle and its defer cap, and the mute switch.
+- After touching **Ember Duel's heroes** (`DUEL_HEROES`, `duelResolvePower`, `duelCanUsePower`, `duelHurtHero`'s armour rule, `duelHeroId`), run `node tools/duel-hero-tests.mjs`. It loads the REAL hero table, armour rule and power resolver out of `app.js` and pins the things that break silently: the default being the safest hero, a retired hero id falling back rather than crashing, armour being spent before life, the two-mana once-a-turn rule, and **every** hero power `kind` actually doing something.
+- After touching **Ember Duel's rival decks or the AI's card timing** (`DUEL_RIVAL_PLANS`, `duelPlanFor`, `duelDeckIsSwarm`, `duelRivalDeck`, `_duelFill`, `duelAiWorthPlaying`), run `node tools/duel-rival-tests.mjs`. It loads the REAL rival-deck section and worth-test out of `app.js` and runs them over a synthetic dex, pinning both halves of the swarm counter: the sweeper deck really holding board clears, the AI really holding them until two minions are on the table, the counter being likelier against a swarm **and** still not the only deck a swarm player meets, and the deck staying legal (40 cards, copy limits, one star past the band at most).
+- After touching **the vetting list's bulk delete** (`_vetSelected`,
+  `_vetVisibleQuestions`, `_vetDeleteMany`, `_vetPruneSelection`,
+  `deleteVettingDocAwait`), run `node tools/vetting-bulk-delete-tests.mjs`. One
+  press can clear the whole vetting list, and both ways it can go wrong are
+  silent: 🗑 Delete all reading `vettingList` instead of the VISIBLE set
+  destroys the questions the author had filtered away and never saw, and a
+  question dropped from the list on a delete the database refused leaves a page
+  that looks tidy and a question that is back at the next sign-in.
+- After touching **the duplicate warning** (`findDuplicateCandidate`,
+  `_dupTokenSet`, `DUP_MIN_SCORE`, `_dupStillThere`, `checkEditorDuplicate`,
+  `dupWatchKick`, `_dupGateSave`), run `node tools/duplicate-warning-tests.mjs`.
+  It fails silently in both directions and the app works perfectly either way:
+  too tight and it never fires (a question re-read off the same paper is never
+  worded byte-for-byte the same), too loose and it fires on every save, which
+  makes it a warning nobody reads and lets the real duplicate through behind
+  it. The harness also pins that the VETTING list is searched — the commonest
+  duplicate of all is the same screenshot read twice in one sitting, and both
+  copies are then in vetting where a bank-only search sees neither.
+- After touching **the doubled part marker** (`qStripOwnPartMarker`,
+  `qPartBodyHtml`, `_qPartOwnMarker`, `_qPartOwnMarkerRe`, `qLiftPartMarkers`),
+  run `node tools/part-marker-tests.mjs`. Both directions are silent: too timid
+  and every AI-built sub-question prints its letter twice ("(a) (a) What is
+  X?"), too eager and it eats the front of the question — "(see Diagram 1) What
+  is X?" opens with a bracket and is prose, and a block labelled (b) whose text
+  opens "(a)" is a disagreement somebody should see rather than have tidied
+  away.
+- After touching **the answer key cross-check** (`akcCompare`,
+  `akcAnswersAgree`, `akcAgreesWithKey`, `akcTextOverlap`, `akcKeySections`,
+  `akcAskEngine`, `akcPrompt`, `akcRecentQuestions`) **or the shared
+  `AI_ENGINE_STORE` slot names**, run `node tools/answer-key-check-tests.mjs`.
+  Every failure here looks like a working report: a loose agreement test turns
+  the whole run green and certifies wrong keys, a reversed comparison tells the
+  teacher to change a correct one, a Gemini call that quietly went through
+  ChatGPT is two columns of the same model agreeing with itself, and a slot
+  name that drifts from the other three portals leaves the key unreadable here
+  — which reports as "only one engine is available" and never as a fault.
+- After touching **✅ Check Questions' detectors** (`_cqTableLabelsChoices`, `_cqOptsAreBareNumbers`, `_cqMcqFixable`, `_cqLocalFindings`, `_cqTableRows`), run `node tools/check-questions-tests.mjs`. Both directions fail silently: too loose and the page tells an employee to blank the options of a question whose choices are NOT in the table — one tap and the wording of all four is gone, with the ＃ button looking like it did the right thing; too tight and the one problem the page exists to catch is never flagged.
+- After touching **🎯 learning-objective tagging** (`qLos`, `_loOrderIds`, `loQuestions`, `loDetachQuestion`, `_loCandidates`), run `node tools/objective-tag-tests.mjs`. Every failure mode here is silent — a tag dropped because the objective list had not loaded, a tag lost because the list no longer knows that id, a filed question that simply does not appear under its objective — and none of them throws.
+- After touching **the printed ANSWER KEY** (`_pushBlockAnswerKey`, `_pushAnswerKeySection`, `_pushAnnotAnswerKey`, `_qFallbackKeySection`, `_akQuestionSections`, `_akSectionsHtml`, or either print path's answer-key branch), run `node tools/answer-key-tests.mjs`. A key that drops a question prints perfectly and looks tidy — there is no error anywhere — so the omission is only found in front of the class.
+- After touching **🔱 artifact levels** (`TCG_ARTI_*`, `tcgArtiPow`, `tcgArtiBlurb`, `tcgArtiAbsorb`), run `node tools/artifact-level-tests.mjs`. Each artifact's `pow` means something different — a percentage, a countdown, a damage multiplier, a boolean — so a single scaling rule is wrong for three of the four, and getting one backwards makes an artifact WEAKER the more copies a student feeds it without throwing anything.
+- After touching **anything in the game-art background removal** (`_stripImageBackground`, the chequerboard detector, `_bgLeftover`, `_screenKeyOut`, `elgKeyed`), run `node tools/bg-cut-tests.mjs && node tools/chroma-key-tests.mjs`. They load the REAL functions out of `app.js` and run them over synthetic sprites, and every case in them is a bug that actually shipped — a pack hollowed out through its own tear, a shadow monster whose plate could not be removed, scale armour deleted by the chequer cutter. Add the case before the fix.
+- Do NOT change enemy base `gold`/`xp` (the `RPG_ENEMIES` map step) — they are shared by the dungeon AND the per-question battle strip. Tune dungeon-only rewards via `ADV_XP_SCALE` / `ADV_GOLD_SCALE` and the floor-clear bonus instead.
+- **🪙 "points" (`rpgState.gold`) must never be earnable from a repeatable button.** Points buy booster packs, so any source that pays without a gate is a farm that beats answering questions. Every faucet must be behind one of: answering a question (`rpgAwardGameQuestion`, which has the rushed-answer and wrong-run guards), a game credit (`_spendCredit` — 1 per 5 questions answered), or a once-per-day/week claim. Ghost Arena **duels pay nothing** (v1.229.0) precisely because they cost no credit and can be re-fought forever; do not put a reward back on `advArenaEnd`, and do not add a daily quest that a free button can complete. Admin/preview grants (`sim-gold`, `tcgAdminGold`) must check the role in the HANDLER, not just hide the button, and `LEGENDS_GOLD_DELTA` only accepts a POSITIVE delta from a real game iframe (`_isEmbeddedGameWindow`).
+- **⚡ The energy bar** (`rpgNoteEnergy` / `_energyState` / `rpgState.energy`, v1.250.0) pays a **free 💠 Gold Pack every `ENERGY_PER_PACK` (50) correct answers** — a pack is real currency, so it obeys the faucet rule above. It fills from exactly two places, both of which have already decided the answer earns something: `rpgOnMarked` (a marked practice question at `credit >= 0.95`) and `rpgAwardGameQuestion` **after** its rushed / wrong-run guards. Do not add a third caller that isn't a marked answer. The pack is banked UNOPENED as `energy.pending` and claimed on the Realm of Embers Packs tab (`tcgOpenFreePack` → `_tcgEnergyHtml`), because the reveal ceremony must not fire on top of the question the student is mid-way through. `_tcgOpenPack(p)` is the shared open path — a bought pack is `tcgBuyPack` (charge, then call it) and a free pack is the same thing minus the charge; anything that opens a pack goes through it or the merge-absorb / publish / reveal steps drift.
+- **Science Strike costs a game credit like every other game** (v1.250.0). It cannot spend one itself — fps.html must NEVER write the hero doc — so it READS `users/{uid}/settings/scienceRpg` for the balance (`loadGameCredits`, mirroring `_creditsToday`'s day-rollover and `DAILY_CREDITS` + `star.raids` allowance), gates `startRun` on it, and banks each run started into **`fps.pendingRuns`** with `increment()` on the leaderboard doc it does own. `rpgClaimStrikePoints` settles all three pending fields on index.html's next load — `pendingPoints` → the wallet, `pendingRuns` → today's credit balance (floored at 0, never negative), `pendingCorrect` → the ⚡ bar — decrementing each by exactly what it took so anything banked in between survives. The credit is banked at run START, not at death, or closing the tab mid-run dodges the charge. A FAILED balance read falls open to 99: index.html settles the runs regardless, and locking a student out of a game they have credits for because of a network blip is the worse failure.
+- **The All-Time board ranks on `q × acc²`** (v1.261.0) — **every question ever done, multiplied by accuracy counted twice**. `rpgScienceScore` is three lines and the whole formula is one of them; keep it that way, because this board has been re-based under students twice and a ranking nobody can check is a ranking nobody trusts.
+  - **`q` is ALL questions, each counting once**: marked practice questions (`stats.marked`) plus questions answered inside the games (`stats.gameQ`). There is deliberately no hidden weighting — an earlier version counted a game MCQ as half, which is defensible and is not what "all questions done" means. `acc` is correct ÷ q, using the FRACTIONAL credit (`stats.creditSum`) for practice so partial marks on a CER answer count for what they were worth.
+  - **`creditSum` is YOUNGER than `marked`, and that asymmetry has already put a student on the board at 8% right** (v1.266.1). `stats.marked` / `stats.correct` go back to the start of the hero; `creditSum` and the game counters only began in v1.231.0, so reading `creditSum` as the whole-history total marks every practice question answered before that date as WRONG — a student with 2,497 questions and roughly three in four right ranked 16th of his own ability. Three things now hold the line, and the invariant behind all of them is that **`correct` is a valid LOWER BOUND on `creditSum`**: every question in the binary count scored ≥ 0.95, and part-right answers only add on top, so an honestly accumulated `creditSum` can never sit below `0.95 × correct`. `rpgHydrate` seeds `creditSum` from `correct` once when it is below that line (the `cap99Fix` pattern), `rpgMyScoreParts` takes the **higher** of the two, and `rpgRowScoreParts` takes the higher of the payload's `correct` and the row's own `audit` counters — that last one is what re-ranks rows already published by a broken build, instead of leaving a student on 8% until they next happen to open the app. Any future counter added beside an older one needs the same treatment.
+  - **Squaring accuracy is what stops the board being won on volume**, and that failure actually shipped once: with accuracy applied only once, 900 questions at 35% beat 400 at 88%. Under `acc²` it is 110 against 310, the right way round. **Re-check exactly that pair if you retune `SCORE_ACC_WEIGHT`.**
+  - **`rpgRowScore` RECOMPUTES from the row's parts** (`rpgRowScoreParts`) instead of trusting the `v` the publisher wrote, so retuning the formula re-ranks the whole board on the next render rather than leaving students who haven't opened the app ranked under the old rule. Three sources in order: a current payload (`score.f >= 2`), the raw `audit` counters every build publishes, then a v1.231.0 payload. `SCORE_PAYLOAD_FORMAT` must be bumped whenever the parts change MEANING — v1.231.0's `q` was work-weighted, and reading it as a plain question count would be wrong.
+  - **Pace is still measured and published** (`rpgState.pace`, shown in the admin's 🕵️ Activity & points view) but does **not** rank anything. Ranking history: XP → Science Score (v1.231.0) → XP (v1.260.0, reverted after students found their standing rewritten overnight) → this. The lesson from that revert is not about the formula: **a leaderboard is a promise, so announce a change before it lands.** The Grand-prizes line on the Leaderboard page states the current rule in one sentence — keep it in step with the code.
+- **Leaderboard bans** (`_getBoardBans` / `adminSetBoardBan`, `users/{adminUid}/settings/boardBans`) are **scoped** (`BOARD_BAN_SCOPES`: `all`, or `embers` = the Embers/Siege/Legends family) and applied at RENDER, per tab, via `rpgBoardBanned(uid, tab)` — the main board's list filter, `tcgRenderBoard` and `_computePrizeWinners` (through `PRIZE_CATEGORY_TAB`) all call the same predicate. A new board must call it too, and a new prize category needs a `PRIZE_CATEGORY_TAB` entry, or bans leak. `rpgFetchLeaderboard` deliberately does NOT filter; it just populates the ban map. An unknown scope fails closed (treated as `all`).
+- **Usage → 🕵️ Activity & points** (`renderActivityAudit`) joins the shared activity collections with the `audit` block `rpgPublishLeaderboard` puts on each row (wallet, duel record, packs, counters) — a teacher cannot read a student's hero doc, so anything the audit view needs must be added to that `audit` block first. `AUDIT_FLAGS` are prompts to look, not verdicts; keep the raw numbers beside every flag.
+- Retroactive point corrections use the **broadcast-marker pattern**: the admin cannot write student hero docs (`users/{uid}/settings/scienceRpg`), so they write one marker under `users/{adminUid}/settings/…` and every student's client applies it to itself once, keyed by an ack field on `rpgState` (see `creditReset`/`_creditsToday` and `duelClawback`/`rpgApplyDuelClawback`). `heroOps`/`rpgApplyHeroOp` is the same thing addressed to ONE student by uid (`adminHeroOp`) — that is how the merge-level reset works. Students must be able to read that settings path in the Firestore rules. Note that resetting TCG merge levels means writing `merges[id] = 1` explicitly for every owned card: `tcgHydrateState` rebuilds a MISSING entry from the student's spare copies, so deleting them hands every merge straight back.
+- **Retired topics — Cell Systems** (`QRETIRED_TOPIC_RE` / `qRetiredTopic` / `qInSyllabus`, v1.274.0) belong in exactly ONE place: the 📄 PSLE / past papers segment, where a paper is reproduced whole and a missing question would only confuse the student reading it. **Everywhere else they must not appear at all** — every practice mode, every game, Snap & Mark, the worksheet creator, the saved-worksheet editor, the custom-quiz builder, the print picker and the scheduled-release picker all go through `qInSyllabus`. Two exceptions are deliberate: the **Question Bank page** still lists them (marked 🚫) because it is the admin's management surface and a question nobody can find is one nobody can fix or delete, and the **exam paper builder** is authoring, not serving.
+  - It is a **topic** rule, not the per-question `notInSyllabus` flag, so it cannot be defeated by an admin forgetting to tick a box on one question out of forty — and it reads **both** topic fields (`topic` and `topic2`).
+  - It fails silently in BOTH directions — too loose serves a retired question to a child, too tight makes a live topic vanish from the whole app with no error anywhere — so run **`node tools/syllabus-tests.mjs`** after touching it. It pins every spelling of the retired topic, the secondary-topic field, and every live topic in `topicsByLevel` staying live (including the ones that merely mention cells: "the cell is the basic unit of life" is P5 Reproduction and very much in the syllabus).
+  - Adding another retired topic is one alternation in `QRETIRED_TOPIC_RE` plus a case in the harness. **`fps.html` carries its own copy of the test** (it reads the bank directly) — keep the two in step.
+- **Terms of access** (`agreementRequire` / `AGREEMENT_VERSION`, `#agreementOverlay`): every student accepts before the portal is usable — enrolled, or not enrolled with a parent/guardian agreeing to the monthly fee — plus the disclaimer that Polymath may change any aspect including points and rewards at any time. **Bump `AGREEMENT_VERSION` to re-prompt the whole roster**; the stored acceptance on `userProfiles/{uid}.agreement` is compared against it. Awaited in the student branch of the auth flow before `famShowLoginPopup()`, skipped for admins and for an admin acting as a student (`_practiceAs`). A failed profile READ re-asks (never let someone through on an error); a failed WRITE lets them through and re-asks next time (never trap a student who agreed). The chosen route shows on the Usage roster and in the audit CSV — the "not enrolled" one is a billing commitment.
+- Two CSS traps in `index.html`, both of which have already cost a rebuild:
+  - **`.confirm-dialog` is declared LATE** and sets `max-width: 400px`, `padding` and `text-align: center`. A new dialog variant that only adds a second class earlier in the file silently loses all three. Use `.confirm-dialog.your-variant` (both classes) for anything that clashes.
+  - **Tailwind's preflight sets `appearance: none` on form controls**, so a bare `<input type="radio">`/`checkbox` renders as an invisible white box. Set `appearance: auto` (plus `-webkit-`) on any you add, or draw your own.
+  - **A `<button>` does not inherit `color`** the way a div does — it falls back to the browser's own button text, which is near-black. Any card-shaped button (`.tcg-arti` was the one that bit, v1.258.0) must set `color: var(--text)` itself, or its unstyled child text is invisible the moment the surface goes dark. The children that happened to set a colour of their own looked fine, which is what made it hard to spot.
+- `.rpg-tabs` must keep `flex-wrap: wrap` and `.rpg-tab` its `flex: 0 0 auto; white-space: nowrap`. Without them eleven leaderboard tabs get squeezed until each label breaks over three lines, the pill goes square, `border-radius: 999px` renders it as a circle, and the emoji on the first line sits outside the curve.
+- Commit messages and pushed artifacts must not contain the model identifier.
+
+## Durable Rapid Add PDFs (v1.360.0, CER only)
+
+`rapid-import/` is an isolated Firebase Functions codebase. Read its README
+before deployment. `_rapidCloudRefresh` discovers availability; never enable
+the close-tab promise merely because the frontend was merged. Uploads need the
+tab until `rapidImportFinish` acknowledges durable storage. The Firestore
+outbox, Cloud Tasks page/publish phases, immutable checkpoints and atomic
+question/progress transaction carry on without it. The last question stays
+private until the following page resolves its continuation. Retry generation,
+phase and cursor checks prevent duplicate or late publication. Source pages
+stay attached to the single question and are linked from its vetting card.
+
+The existing browser PDF importer remains available when the worker is absent
+or online mode is unchecked. Desktop now has an explicit multiple-file picker.
+This change is scoped to CER; no sibling portal or Maths deployment is included.
+Run both existing PDF/merge regression suites and the tests in
+`rapid-import/functions` when changing this flow. Bump `APP_VERSION` in app.js.
+
+
+## Permanent interface (2026-09-14)
+
+See `docs/interface-studio.md`. The user approved the arcade interface as
+permanent for both subjects. All signed-in roles receive it immediately; do not
+restore the preview banner, rollback controls or remote release flag. Preserve
+auth cleanup, subject-specific motion preferences, keyboard navigation and the
+screen-only CSS scope. Keep the shared module and styles in sync with Math.
+Run `node tools/interface-studio-tests.mjs` when changing this integration.
+
+
+## Ai-nstein admin voice and Rapid Add duplicate review (v1.399.0)
+
+The portal imports three bounded modules from app.js: ainstein-live.js for live voice lifecycle/UI, ainstein-admin-agent.js for the named admin action registry and bounded specialist search, and rapid-duplicates.js for conservative bulk-delete matching. Keep these files deployed beside app.js. The app adapter owns all existing navigation, preview and Firestore operations. See AINSTEIN-ADMIN.md and live-assistant/README.md for user behavior, admin-only access, budgets, separate backend deployment and tests. No assistant executes model-generated code. Never weaken the identity checks, practice-as exclusion, duplicate transaction revalidation, or published-bank keeper rule.
