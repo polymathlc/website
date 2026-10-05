@@ -9339,7 +9339,7 @@ body.wk-clocked-in .page-body { padding-bottom: 104px; }
 #landingPage .lp-header.lp-scrolled { box-shadow:0 8px 28px rgba(9,69,77,.10); }
 #landingPage .lp-why-card, #landingPage .lp-feature, #landingPage .lp-programme { transition:transform .35s cubic-bezier(.16,1,.3,1), box-shadow .35s ease; }
 #landingPage .lp-why-card:hover, #landingPage .lp-feature:hover, #landingPage .lp-programme:hover { transform:translateY(-4px); box-shadow:0 14px 34px rgba(9,69,77,.10); }
-/* Logo palette accents and the assembling-shapes layer (landing-motion.js). */
+/* Logo palette accents (the logo-shards layer is below, see landing-motion.js). */
 #landingPage .lp-eyebrow, #landingPage .lp-about-kicker { color:var(--lp-plum); }
 #landingPage .lp-about-story .lp-about-kicker, #landingPage .lp-why-card-lead .lp-about-kicker { color:#ffb3dc; }
 #landingPage h1 em, #landingPage h2 em { color:var(--lp-pink); font-style:italic; }
@@ -9349,11 +9349,14 @@ body.wk-clocked-in .page-body { padding-bottom: 104px; }
 #landingPage .lp-button-secondary:hover { color:#fff; }
 #landingPage .lp-why, #landingPage .lp-demo-section { background:rgba(233,245,246,.72); }
 #landingPage main, #landingPage .lp-footer { position:relative; z-index:1; }
-#landingPage .lp-shapes { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
-#landingPage .lp-shape { position:absolute; left:0; top:0; will-change:transform,opacity; }
-#landingPage .lp-shape svg { display:block; overflow:visible; }
+/* Logo shards (landing-motion.js): two canvas strips exactly as wide as the side
+   gutters, above the section bands (z 1) and under the sticky header (z 50). */
+#landingPage .lp-shards { position:fixed; top:0; z-index:2; display:none; pointer-events:none; }
+#landingPage .lp-shards-l { left:0; }
+#landingPage .lp-shards-r { right:0; }
 html { scroll-behavior:smooth; }
-@media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } #landingPage .lp-progress { display:none; } }
+@media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } #landingPage .lp-progress { display:none; } #landingPage .lp-shards { display:none!important; } }
+@media print { #landingPage .lp-shards { display:none!important; } }
 </style>
 <style>
 /* Official centre identity and public About Us navigation. */
