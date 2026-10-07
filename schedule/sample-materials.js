@@ -88,7 +88,7 @@
       const worksheet = value(subject).worksheet;
       return '<section class="sample-admin-subject"><h3>' + LABEL[subject] + '</h3>' +
         '<form id="sample-upload-' + subject + '"><div class="grid-2"><div class="field"><label for="sample-title-' + subject + '">Worksheet title</label><input id="sample-title-' + subject + '" maxlength="100" required value="' + esc(worksheet?.title || LABEL[subject] + ' sample worksheet') + '"></div>' +
-        '<div class="field"><label for="sample-pdf-' + subject + '">Sample PDF (up to 10 MB)</label><input id="sample-pdf-' + subject + '" type="file" accept="application/pdf,.pdf" required></div></div>' +
+        '<div class="field"><label for="sample-pdf-' + subject + '">Sample PDF (up to 10 MB, 30 pages)</label><input id="sample-pdf-' + subject + '" type="file" accept="application/pdf,.pdf" required></div></div>' +
         '<button class="btn small" type="submit">Upload &amp; publish worksheet</button></form>' +
         '<div class="sample-admin-actions"><label class="field" for="sample-search-' + subject + '"><span class="sample-help">Find questions</span><input id="sample-search-' + subject + '" type="search" maxlength="100" placeholder="Title, topic or question ID"></label>' +
         '<button class="btn small ghost" data-load="' + subject + '">Load questions</button><span class="sample-selected" id="sample-count-' + subject + '">' + selectedIds(subject).length + ' / 5 selected</span></div>' +
