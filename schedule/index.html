@@ -377,11 +377,9 @@
      happen in a day, so a parent sees at a glance which day and time each class
      runs. It is a real <table>, so a screen reader announces the day and the
      time of every class. On a phone each class shrinks to its level and a
-     short subject word (Math / Sci), and a tap opens the full details. The
-     subject emoji are hidden on a phone: parents read them as decoration
-     rather than as Math and Science, so words are clearer there. */
+     subject icon, and a tap opens the full details. */
   .sr-only { position:absolute !important; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
-  .vt-short, .tt-ds, .tt-star, .tt-sbs { display:none; }
+  .vt-short, .tt-ds, .tt-star { display:none; }
   .tt-card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:22px 20px 18px; margin-bottom:16px; box-shadow:0 2px 10px rgba(5,108,118,.05); }
   .tt-top { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 16px; margin-bottom:14px; }
   .tt-sum { font-size:14px; line-height:1.5; color:var(--gray-600); }
@@ -468,9 +466,6 @@
     .tt-class { align-items:center; justify-content:center; gap:2px; min-height:56px; padding:6px 2px; text-align:center;
       border-left:1px solid var(--bd); border-top:4px solid var(--acc); }
     .tt-sbn, .tt-md, .tt-mc { display:none; }
-    /* No subject emoji on a phone: the short word says it plainly instead */
-    .tt-ic, .tt-key-ic { display:none; }
-    .tt-sbs { display:inline; font-size:10.5px; font-weight:700; letter-spacing:.01em; }
     .tt-star { display:inline; }
     .tt-lv { font-size:13px; }
     .tt-full { margin-top:2px; padding:0 4px; font-size:9px; letter-spacing:.02em; }
@@ -783,7 +778,7 @@ const auth = firebase.auth();
 
 // Shown to the signed-in teacher in the footer, so a deploy can be checked.
 // Bump it on every change to this page.
-const SCHEDULE_PAGE_VERSION = 'v1.2.1';
+const SCHEDULE_PAGE_VERSION = 'v1.2.0';
 
 const ADMIN_EMAIL = 'chungzhikai@gmail.com';
 // Every trial booking emails these addresses via the "Trigger Email"
@@ -899,11 +894,11 @@ function pairPill(cls, lead, phys, onl, suffix) {
 const DEFAULT_CONFIG = {
   trialTitle: 'Book a Trial Class',
   trialDetails: 'Experience a full 1h 45min lesson with Polymath Learning Centre.\nSmall groups, Primary 3 to Primary 6 Math and Science, online or at our Clementi centre.',
-  trialPrice: 50,
+  trialPrice: 30,
   monthlyFee: '',
   trialPriceOnline: '',
   monthlyFeeOnline: '',
-  masterTrialPrice: 100,
+  masterTrialPrice: '',
   masterMonthlyFee: '',
   masterTitle: 'Master Class',
   masterDetails: 'Our premium programme, taught in person at our Clementi centre. Smaller groups, deeper exam technique and closer attention to every child.',
@@ -1357,8 +1352,6 @@ const SCHEDULE_VIEWS = ['level', 'week', 'day'];
 let scheduleView = (() => { try { return localStorage.getItem(VIEW_KEY) || ''; } catch (e) { return ''; } })();
 const LEVEL_NAME = { P3: 'Primary 3', P4: 'Primary 4', P5: 'Primary 5', P6: 'Primary 6' };
 const SUBJECT_ICON = { Math: '🔢', Science: '🔬' };
-// The word a phone shows in a timetable block in place of the subject emoji.
-const SUBJECT_SHORT = { Math: 'Math', Science: 'Sci' };
 const WA_LINK = 'https://wa.me/6596450588';
 
 function currentView() {
@@ -1552,8 +1545,7 @@ function ttCellHtml(cell) {
     + ' title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label + (dim ? ' (outside your selection)' : '')) + '">'
     + '<span class="tt-lv">' + (master ? '<span class="tt-star" aria-hidden="true">✦</span>' : '') + escapeHtml(s.level) + '</span>'
     + '<span class="tt-sb"><span class="tt-ic" aria-hidden="true">' + (SUBJECT_ICON[s.subject] || '') + '</span>'
-    +   '<span class="tt-sbn">' + escapeHtml(s.subject) + '</span>'
-    +   '<span class="tt-sbs" aria-hidden="true">' + escapeHtml(SUBJECT_SHORT[s.subject] || s.subject) + '</span></span>'
+    +   '<span class="tt-sbn">' + escapeHtml(s.subject) + '</span></span>'
     + (master ? '<span class="tt-mc">✦ Master Class</span>' : '')
     + '<span class="tt-md">' + escapeHtml(mode) + '</span>'
     + (full ? '<span class="tt-full">Full</span>' : '')
@@ -1576,8 +1568,7 @@ function renderTimetableView() {
   else if (!matched.length) sum = '<b>None of the ' + count(all.length) + '</b> match your selection.';
   else sum = '<b>' + matched.length + ' of ' + count(all.length) + '</b> match your selection. The rest are faded.';
   const key = (cls, label) => '<span role="listitem" class="tt-key ' + cls + '"><i aria-hidden="true"></i>' + label + '</span>';
-  const keys = key('math', '<span class="tt-key-ic" aria-hidden="true">🔢 </span>Math')
-    + key('sci', '<span class="tt-key-ic" aria-hidden="true">🔬 </span>Science')
+  const keys = key('math', '🔢 Math') + key('sci', '🔬 Science')
     + (hasMaster ? key('master', '✦ Master Class') : '')
     + (hasFull ? key('full', 'Full') : '')
     + (hasOff ? key('off', 'No lessons') : '');
