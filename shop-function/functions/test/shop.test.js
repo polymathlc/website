@@ -5,7 +5,7 @@ const { createService, validateCheckout, priceCheckout, sessionParams, buildChec
   ShopError, LIMITS, SOURCE, ORDER_CODE_CHARS } = require('../service');
 const { createRepository } = require('../repository');
 const { createStripe, verifyWebhook, signWebhook, encodeBody, StripeError } = require('../stripe');
-const { receiptMail, mailId, SENDER_EMAIL, NOTIFY_EMAILS, notifyMailId, orderNotifyMail } = require('../receipt');
+const { receiptMail, mailId, SENDER_EMAIL } = require('../receipt');
 
 const NOW = Date.UTC(2026, 9, 19, 9);
 const WEBHOOK_SECRET = 'whsec_test_secret';
@@ -137,7 +137,6 @@ function harness(seedRows = seed(), options = {}) {
   return { db, stripe, logs, service, call, webhookCall,
     create: (body = cart(), overrides) => call(service.createCheckout, body, overrides),
     status: (body, overrides) => call(service.checkoutStatus, body, overrides),
-    notify: (code, overrides) => call(service.notifyOrder, { code }, overrides),
     receipt: (code, token = 'admin-token-0123456789') => call(service.sendReceipt, { code },
       token ? { headers: { authorization: 'Bearer ' + token } } : {}),
     advance: ms => { clock += ms; } };
@@ -507,7 +506,7 @@ test('a card payment emails one receipt from the centre, however many times it i
   await h.status({ code: 'QRSTUV', sessionId });
   await h.webhookCall(completed(await h.stripe.retrieveCheckoutSession(sessionId)));
   await h.status({ code: 'QRSTUV', sessionId });
-  assert.deepEqual(mailRows(h.db), ['mail/' + notifyMailId('QRSTUV'), 'mail/' + mailId('QRSTUV', 1)].sort());
+  assert.deepEqual(mailRows(h.db), ['mail/' + mailId('QRSTUV', 1)]);
   const mail = h.db.rows.get('mail/' + mailId('QRSTUV', 1));
   assert.deepEqual(mail.to, ['parent@example.test']);
   assert.equal(mail.from, 'Polymath Learning Centre <' + SENDER_EMAIL + '>');
@@ -593,86 +592,4 @@ test('receipts are refused for unpaid, unknown and email-less orders, and never 
   assert.equal(taken.statusCode, 200);
   assert.deepEqual(h.db.rows.get('mail/' + mailId('TAKEN1', 1)).to, ['old@example.test']);
   assert.ok(mailRows(h.db).some(path => path.startsWith('mail/' + mailId('TAKEN1', 1) + '-')));
-});
-
-/* ─── The centre's "new order" email ─── */
-test('a card payment tells the centre once, in both inboxes, with the buyer to reply to', async () => {
-  const h = harness(seed(), { codes: ['QRSTUV'] });
-  await h.create(cart({ fulfilment: 'delivery', address: '1 Road' }));
-  const sessionId = h.db.rows.get('shop_checkouts/QRSTUV').sessionId;
-  h.stripe.pay(sessionId);
-  await h.webhookCall(completed(await h.stripe.retrieveCheckoutSession(sessionId)));
-  await h.status({ code: 'QRSTUV', sessionId });
-  await h.webhookCall(completed(await h.stripe.retrieveCheckoutSession(sessionId)));
-  const mail = h.db.rows.get('mail/' + notifyMailId('QRSTUV'));
-  assert.deepEqual(mail.to, ['chungzhikai@gmail.com', 'admin@polymathlc.com.sg']);
-  assert.deepEqual([...NOTIFY_EMAILS], ['chungzhikai@gmail.com', 'admin@polymathlc.com.sg']);
-  assert.equal(mail.from, 'Polymath Learning Centre <' + SENDER_EMAIL + '>');
-  assert.equal(mail.replyTo, 'parent@example.test');
-  assert.match(mail.message.subject, /^New order QRSTUV: \$53\.50 \(PAID by card\) from Test Parent$/);
-  assert.match(mail.message.text, /Paid by card through Stripe/);
-  assert.match(mail.message.text, /Delivery to: 1 Road/);
-  assert.match(mail.message.text, /WhatsApp: 9123 4567/);
-  assert.equal(mailRows(h.db).filter(path => path.includes('polymath-shop-order-')).length, 1);
-  assert.ok(h.db.rows.get('shop_orders/QRSTUV').notifiedAt);
-  // The page's own call on the way back from Stripe adds nothing.
-  const again = await h.notify('QRSTUV');
-  assert.deepEqual(again.body, { ok: true, already: true });
-  assert.equal(mailRows(h.db).filter(path => path.includes('polymath-shop-order-')).length, 1);
-});
-
-test('a leftover notice never stops a card payment from being recorded', async () => {
-  const rows = Object.assign(seed(), { ['mail/' + notifyMailId('RSTUVW')]: { to: ['old@example.test'] } });
-  const h = harness(rows, { codes: ['RSTUVW'] });
-  await h.create();
-  const sessionId = h.db.rows.get('shop_checkouts/RSTUVW').sessionId;
-  h.stripe.pay(sessionId);
-  assert.equal((await h.status({ code: 'RSTUVW', sessionId })).body.paid, true);
-  assert.equal(h.db.rows.get('shop_orders/RSTUVW').status, 'paid');
-  assert.deepEqual(h.db.rows.get('mail/' + notifyMailId('RSTUVW')).to, ['old@example.test']);
-});
-
-test('a PayNow order tells the centre as soon as it is placed, once, and says to check the payment', async () => {
-  const h = harness(Object.assign(seed(), { 'shop_orders/PENDNG': payNowOrder({ code: 'PENDNG', status: 'pending', receiptUrl: 'https://example.test/shot.jpg' }) }));
-  const first = await h.notify('PENDNG');
-  assert.equal(first.statusCode, 200);
-  assert.deepEqual(first.body, { ok: true, already: false });
-  const mail = h.db.rows.get('mail/' + notifyMailId('PENDNG'));
-  assert.deepEqual(mail.to, ['chungzhikai@gmail.com', 'admin@polymathlc.com.sg']);
-  assert.match(mail.message.subject, /New order PENDNG: \$37\.00 \(PayNow: check payment\)/);
-  assert.match(mail.message.text, /Check the bank for reference/);
-  assert.match(mail.message.text, /Payment screenshot: https:\/\/example\.test\/shot\.jpg/);
-  assert.equal(mail.replyTo, 'paynow@example.test');
-  assert.deepEqual((await h.notify('PENDNG')).body, { ok: true, already: true });
-  assert.equal(mailRows(h.db).length, 1);
-  assert.ok(h.db.rows.get('shop_orders/PENDNG').notifiedAt);
-  // No sign-in is needed, but the caller chooses nothing except the code.
-  assert.equal((await h.call(h.service.notifyOrder, { code: 'PENDNG', to: 'x@example.test' })).statusCode, 400);
-});
-
-test('notices are refused for unknown, cancelled and badly named orders, other origins, and past the daily cap', async () => {
-  const rows = Object.assign(seed(), { 'shop_orders/GONE22': payNowOrder({ code: 'GONE22', status: 'cancelled' }) });
-  for (let i = 0; i < LIMITS.notifyDay + 1; i++) rows['shop_orders/A' + String(1000 + i)] = payNowOrder({ code: 'A' + String(1000 + i), status: 'pending' });
-  const h = harness(rows);
-  assert.equal((await h.notify('ZZZZZZ')).statusCode, 404);
-  assert.equal((await h.notify('GONE22')).body.error, 'order-cancelled');
-  assert.equal((await h.notify('bad code')).statusCode, 400);
-  assert.equal((await h.notify('A1000', { headers: { origin: 'https://evil.example' } })).statusCode, 403);
-  assert.deepEqual(mailRows(h.db), []);
-  for (let i = 0; i < LIMITS.notifyDay; i++) assert.equal((await h.notify('A' + String(1000 + i))).statusCode, 200);
-  const over = await h.notify('A' + String(1000 + LIMITS.notifyDay));
-  assert.equal(over.statusCode, 429);
-  assert.equal(over.body.error, 'too-many-notifications');
-  assert.equal(mailRows(h.db).length, LIMITS.notifyDay);
-});
-
-test('the notice escapes what the buyer typed, flags oversells, and has no reply-to for a bad email', () => {
-  const mail = orderNotifyMail(payNowOrder({ status: 'pending', customer: { name: '<b>Eve</b>', phone: '8', email: 'nope' }, note: 'a & <script>',
-    stockShort: [{ productId: 'p', wanted: 2, had: 1 }], paymentChecks: ['amount-mismatch'] }), { now: NOW });
-  assert.ok(!mail.message.html.includes('<b>Eve</b>') && mail.message.html.includes('&lt;b&gt;Eve&lt;/b&gt;'));
-  assert.ok(!mail.message.html.includes('<script>'));
-  assert.equal(mail.replyTo, SENDER_EMAIL);
-  assert.match(mail.message.text, /WARNING: Stock ran short on 1 line/);
-  assert.match(mail.message.text, /WARNING: Payment check: amount-mismatch/);
-  assert.equal(orderNotifyMail(null), null);
 });

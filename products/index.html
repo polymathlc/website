@@ -705,7 +705,7 @@ let deliveryFee = 0;
 // shop_settings/config.cardPayments: false hides "Pay by card"; missing means on.
 // createShopCheckout refuses card checkouts too while it is false.
 let cardEnabled = true;
-const PRODUCTS_PAGE_VERSION = 'v1.5.1';
+const PRODUCTS_PAGE_VERSION = 'v1.5.0';
 const WHATSAPP_NUMBER = '6596450588';
 // Card payments (shop-function/, codebase polymath-shop). Prices are always worked
 // out again on the server; the page only sends product ids and quantities.
@@ -715,15 +715,6 @@ const CARD_STATUS_URL = SHOP_API + 'shopCheckoutStatus';
 // Emails a paid order's receipt from admin@polymathlc.com.sg (admin only; the
 // server checks the admin's Google sign-in and composes the email itself).
 const RECEIPT_URL = SHOP_API + 'sendShopReceipt';
-// 🔔 v1.5.1: every order emails the centre. notifyShopOrder reads the order back
-// from shop_orders and writes the "new order" email itself; a card order's is
-// written by the server with the payment, so the call below is then a no-op.
-const NOTIFY_URL = SHOP_API + 'notifyShopOrder';
-// Only used when that service cannot be reached (see notifyCentre): the same two
-// inboxes the server uses.
-const NOTIFY_EMAILS = ['chungzhikai@gmail.com', 'admin@polymathlc.com.sg'];
-const NOTIFY_FROM = 'Polymath Learning Centre <admin@polymathlc.com.sg>';
-const NOTIFIED_KEY = 'plc_shop_notified_v1';
 const CARD_STATUS_TRIES = 12;
 const CARD_STATUS_WAIT_MS = 2500;
 const CART_KEY = 'plc_shop_cart_v1';
@@ -1439,87 +1430,6 @@ $('pay-share').addEventListener('click', async () => {
   } catch (e) { if (e && e.name !== 'AbortError') downloadDataUrl(checkout.imageUrl, 'Polymath-PayNow-' + checkout.code + '.png'); }
 });
 
-/* ═══ 🔔 Telling the centre about a new order (v1.5.1) ═══
-   Until v1.5.0 a sale only emailed the BUYER a receipt, so an order sat on the
-   admin page until somebody happened to open it. Now every order emails
-   chungzhikai@gmail.com and admin@polymathlc.com.sg the moment it is placed.
-
-   The server is asked first (notifyShopOrder): it reads the order from
-   shop_orders, composes the email and sends one per order code however often it
-   is asked. If it cannot be reached — the function not deployed yet, the network
-   down, or the order itself failed to save — the page writes the same notice to
-   the `mail` collection, the way the schedule page reports a booking. It never
-   blocks or changes what the buyer sees: a failed notice is only logged. */
-function notifiedCodes() { try { return JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '[]') || []; } catch (e) { return []; } }
-function rememberNotified(code) {
-  try { const list = notifiedCodes().filter(c => c !== code); list.push(code); localStorage.setItem(NOTIFIED_KEY, JSON.stringify(list.slice(-40))); } catch (e) {}
-}
-function centreNoticeMail(o, saved) {
-  const card = o.payment === 'card';
-  const c = o.customer || {};
-  const tag = card ? 'PAID by card' : 'PayNow: check payment';
-  const what = card
-    ? 'Paid by card through Stripe. Nothing to check.'
-    : 'The buyer says they have paid by PayNow. Check the bank for reference "' + o.reference + '", then press Mark paid on the orders page (that emails their receipt).';
-  const items = (o.items || []).map(i => i.qty + ' x ' + i.name + (i.sku ? ' (' + i.sku + ')' : '') + '  ' + money(i.lineTotal));
-  const ful = o.fulfilment === 'delivery' ? 'Delivery to: ' + (o.address || '(address not given)') : 'Collect at the centre';
-  const adminUrl = 'https://polymathlc.com.sg/products/#admin';
-  const lines = ['A new order was placed on polymathlc.com.sg/products.', '', what];
-  if (!saved) lines.push('WARNING: the page could not save this order online, so it is NOT on the orders page. Everything we know is in this email.');
-  lines.push('', 'Order code: ' + o.code, 'Reference: ' + o.reference, 'Total: ' + money(o.total), '');
-  items.forEach(l => lines.push(l));
-  if (o.deliveryFee) lines.push('Delivery fee  ' + money(o.deliveryFee));
-  lines.push('', 'Name: ' + (c.name || '(not given)'), 'WhatsApp: ' + (c.phone || '(not given)'), 'Email: ' + (c.email || '(not given)'), ful);
-  if (o.note) lines.push('Note: ' + o.note);
-  if (o.receiptUrl) lines.push('Payment screenshot: ' + o.receiptUrl);
-  lines.push('', 'Orders page: ' + adminUrl);
-  const row = (k, v) => '<tr><td style="padding:3px 16px 3px 0;font-size:14px;color:#8A8A8A;white-space:nowrap;vertical-align:top">' + k
-    + '</td><td style="padding:3px 0;font-size:14px;color:#1A1A1A;font-weight:600">' + esc(v) + '</td></tr>';
-  const html = '<div style="font-family:\'Century Gothic\',CenturyGothic,AppleGothic,Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#1A1A1A">'
-    + '<p style="font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#8A5A12;margin:0 0 8px">New order on /products</p>'
-    + '<p style="font-size:24px;font-weight:700;line-height:1.3;margin:0 0 16px">' + money(o.total) + ' &middot; ' + esc(o.code) + '</p>'
-    + '<div style="background:' + (card ? '#EAF7EE;border:1px solid #BFE5C8' : '#FFF4E0;border:1px solid #FFD28A') + ';border-radius:14px;padding:14px 18px;margin:0 0 20px;font-size:15px;line-height:1.6"><b>'
-    + esc(tag) + '</b><br>' + esc(what) + '</div>'
-    + (saved ? '' : '<div style="background:#FDECEC;border:1px solid #F5B5B5;border-radius:14px;padding:12px 18px;margin:0 0 12px;font-size:14px;line-height:1.6">The page could not save this order online, so it is NOT on the orders page. Everything we know is in this email.</div>')
-    + '<div style="background:#FFF8EE;border:1px solid #FFE0B2;border-radius:14px;padding:16px 18px;margin:0 0 24px"><table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse">'
-    + row('Order code', o.code) + row('Reference', o.reference) + row('Name', c.name || '(not given)') + row('WhatsApp', c.phone || '(not given)')
-    + row('Email', c.email || '(not given)') + row('Fulfilment', ful) + (o.note ? row('Note', o.note) : '') + '</table></div>'
-    + '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin:0 0 8px">'
-    + (o.items || []).map(i => '<tr><td style="padding:10px 0;border-bottom:1px solid #F0E6D6;font-size:15px;line-height:1.5">' + esc(i.qty) + ' &times; ' + esc(i.name)
-        + (i.sku ? '<br><span style="font-size:12px;color:#8A8A8A">' + esc(i.sku) + '</span>' : '') + '</td><td style="padding:10px 0;border-bottom:1px solid #F0E6D6;font-size:15px;text-align:right;white-space:nowrap">' + money(i.lineTotal) + '</td></tr>').join('')
-    + (o.deliveryFee ? '<tr><td style="padding:8px 0 0;font-size:14px;color:#5C5C5C">Delivery fee</td><td style="padding:8px 0 0;text-align:right;font-size:14px;color:#5C5C5C">' + money(o.deliveryFee) + '</td></tr>' : '')
-    + '<tr><td style="padding:8px 0 0;font-size:16px;font-weight:700">Total</td><td style="padding:8px 0 0;text-align:right;font-size:16px;font-weight:700">' + money(o.total) + '</td></tr></table>'
-    + (o.receiptUrl ? '<p style="font-size:14px;margin:20px 0 0"><a href="' + esc(o.receiptUrl) + '" style="color:#8A5A12">View the payment screenshot</a></p>' : '')
-    + '<p style="margin:28px 0 0"><a href="' + adminUrl + '" style="display:inline-block;background:#1A1A1A;color:#FFFFFF;text-decoration:none;font-size:15px;font-weight:700;padding:12px 22px;border-radius:12px">Open the orders page</a></p></div>';
-  const mail = {
-    to: NOTIFY_EMAILS, from: NOTIFY_FROM,
-    message: { subject: 'New order ' + o.code + ': ' + money(o.total) + ' (' + tag + ')' + (c.name ? ' from ' + String(c.name).slice(0, 60) : ''), text: lines.join('\n'), html },
-    polymathShop: { code: o.code, kind: 'order-notify-page' }
-  };
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email || '')) mail.replyTo = c.email;
-  return mail;
-}
-// saved: whether shop_orders/{code} was written. Never throws.
-async function notifyCentre(order, saved) {
-  if (!order || !order.code) return;
-  if (notifiedCodes().includes(order.code)) return;
-  // The server can only report an order it can read, so an order that failed to
-  // save goes straight to the page's own notice.
-  if (saved) {
-    try {
-      const answer = await postJson(NOTIFY_URL, { code: order.code });
-      if (answer.status === 200 && answer.data.ok) { rememberNotified(order.code); return; }
-      // Over the daily cap or a cancelled order: the server has decided, leave it.
-      if (answer.status === 429 || answer.status === 409) return;
-      console.warn('Order notice refused by the server (' + answer.status + '), sending from the page');
-    } catch (e) { console.warn('Order notice service unreachable, sending from the page', e); }
-  }
-  try {
-    await db.collection('mail').add(centreNoticeMail(order, saved));
-    rememberNotified(order.code);
-  } catch (e) { console.error('The centre could not be told about order ' + order.code, e); }
-}
-
 function orderWhatsAppText(o) {
   const how = o.payment === 'card' ? 'card' : 'PayNow';
   const lines = ['Hi Polymath, I have placed an order and paid by ' + how + '.', '', 'Order code: ' + o.code, 'Reference: ' + o.reference];
@@ -1576,8 +1486,6 @@ $('co-paid').addEventListener('click', async () => {
     : '<div class="callout warn">We could not save your order online. <strong>Please tap the WhatsApp button below</strong> to send it to us — your payment is safe, and we\'ll match it with reference <strong>' + esc(order.reference) + '</strong>.</div>';
   cart = []; saveCart(); renderCartCount(); renderShop();
   setStep(3);
-  // 🔔 Tell the centre (after the buyer already sees their confirmation).
-  notifyCentre(order, saved);
 });
 
 /* ═══ Card payment (Stripe Checkout) ═══
@@ -1681,12 +1589,7 @@ async function resumeCardReturn() {
   for (let i = 0; i < CARD_STATUS_TRIES; i++) {
     try {
       const answer = await postJson(CARD_STATUS_URL, { code, sessionId });
-      if (answer.status === 200 && answer.data.paid && answer.data.order) {
-        showCardDone(answer.data.order);
-        // 🔔 The server has normally told the centre already; this only fills the gap.
-        notifyCentre(Object.assign({ payment: 'card' }, answer.data.order), true);
-        return;
-      }
+      if (answer.status === 200 && answer.data.paid && answer.data.order) { showCardDone(answer.data.order); return; }
       if (answer.status === 404 || answer.status === 400) break;
     } catch (e) { console.warn('Card status check failed', e); }
     await new Promise(r => setTimeout(r, CARD_STATUS_WAIT_MS));

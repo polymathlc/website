@@ -18,11 +18,6 @@
 //                        sign-in) to email a paid order's receipt: a PayNow order's
 //                        when it is marked paid, or any paid order's again.
 //
-//   notifyShopOrder      the page calls this as soon as a PayNow order is saved, so
-//                        the centre gets a "new order" email (receipt.js). Public,
-//                        but it only ever emails the centre's own two inboxes about
-//                        an order that really is in shop_orders, once per order.
-//
 // A card order's receipt is emailed by finalize() itself (see receipt.js), from
 // Polymath Learning Centre <admin@polymathlc.com.sg>.
 //
@@ -44,8 +39,6 @@ const ORDER_CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const LIMITS = Object.freeze({
   bodyBytes: 16384, lines: 50, qtyPerLine: 99,
   perIpHour: 20, globalDay: 400,
-  // "New order" emails to the centre in one day, across every buyer.
-  notifyDay: 200,
   // Stripe refuses SGD charges under $0.50, and the shop has no business above this.
   minimumCents: 50, maximumCents: 1000000
 });
@@ -434,26 +427,7 @@ function createService({ repository, stripe, webhookSecret, verifyIdToken = asyn
     }
   }
 
-  // The page's "tell the centre" call, made right after a PayNow order is saved
-  // (and again when a card buyer lands back on the page, where it is a no-op
-  // because finalize() has already sent it). Nothing but the order code is read
-  // from the caller.
-  async function notifyOrder(req, res) {
-    if (!cors(req, res)) return;
-    try {
-      const body = req.body;
-      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'code')) fail();
-      if (typeof body.code !== 'string' || !/^[A-Z0-9]{4,12}$/.test(body.code)) fail();
-      const at = now(), day = Math.floor(at / DAY);
-      const sent = await repository.notifyOrder(body.code, at,
-        { id: 'notify-' + day, maximum: LIMITS.notifyDay, expiresAt: (day + 2) * DAY });
-      return res.status(200).json({ ok: true, already: !!sent.already });
-    } catch (error) {
-      return answerError(res, error, 'shop-notify-failed');
-    }
-  }
-
-  return { createCheckout, checkoutStatus, webhook, sendReceipt, notifyOrder, cleanup: () => repository.cleanup(now()), sweep };
+  return { createCheckout, checkoutStatus, webhook, sendReceipt, cleanup: () => repository.cleanup(now()), sweep };
 }
 
 module.exports = {
