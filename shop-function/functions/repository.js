@@ -1,7 +1,7 @@
 'use strict';
 const { ShopError, CHECKOUT_COLLECTION, LIMIT_COLLECTION, ORDER_COLLECTION, PRODUCT_COLLECTION, SETTINGS_DOC,
   unlimited } = require('./service');
-const { MAIL_COLLECTION, mailId, receiptMail } = require('./receipt');
+const { MAIL_COLLECTION, mailId, receiptMail, notifyMailId, orderNotifyMail } = require('./receipt');
 const { BOOKING_COLLECTION, SCHEDULE_DOC } = require('./booking');
 const { bookingMailId, adminBookingMail, parentBookingMail } = require('./booking-mail');
 const { DIAGNOSTIC_COLLECTION, diagnosticMailId, adminDiagnosticMail, parentDiagnosticMail } = require('./diagnostic');
@@ -188,8 +188,8 @@ function createRepository(db, Timestamp) {
     async finalize(code, payment, now) {
       const checkoutRef = checkouts.doc(code), orderRef = orders.doc(code);
       return db.runTransaction(async transaction => {
-        const firstMailRef = mail.doc(mailId(code, 1));
-        const [checkoutSnapshot, orderSnapshot, mailSnapshot] = await transaction.getAll(checkoutRef, orderRef, firstMailRef);
+        const firstMailRef = mail.doc(mailId(code, 1)), notifyRef = mail.doc(notifyMailId(code));
+        const [checkoutSnapshot, orderSnapshot, mailSnapshot, notifySnapshot] = await transaction.getAll(checkoutRef, orderRef, firstMailRef, notifyRef);
         if (!checkoutSnapshot.exists) return { missing: true };
         if (orderSnapshot.exists) return { already: true, order: orderSnapshot.data() };
         const checkout = checkoutSnapshot.data();
@@ -233,6 +233,13 @@ function createRepository(db, Timestamp) {
           Object.assign(order, { receiptCount: 1, receiptSentAt: at, receiptSentTo: receipt.to[0] });
           transaction.create(firstMailRef, receipt);
         }
+        // The centre is told about the sale in the same transaction, once. Like the
+        // receipt, a leftover document under the same id never blocks the payment.
+        const notice = notifySnapshot.exists ? null : orderNotifyMail(Object.assign({}, order, { paidAt: now, createdAt: now }), { now });
+        if (notice) {
+          order.notifiedAt = at;
+          transaction.create(notifyRef, notice);
+        }
         transaction.create(orderRef, order);
         transaction.update(checkoutRef, { status: 'paid', paidAt: at });
         return { order };
@@ -262,6 +269,31 @@ function createRepository(db, Timestamp) {
         transaction.create(mailRef, receipt);
         transaction.update(orderRef, { receiptCount: count + 1, receiptSentAt: at, receiptSentTo: receipt.to[0] });
         return { to: receipt.to[0], count: count + 1, resend: count > 0 };
+      });
+    },
+
+    // Tells the centre about an order the page has just saved (a PayNow order; a
+    // card order has already told it from finalize()). Everything in the email is
+    // read back from shop_orders here, never taken from the caller, and the mail id
+    // is fixed per order code, so calling this again sends nothing more. The daily
+    // quota bounds how many emails a stranger writing junk orders could cause.
+    async notifyOrder(code, now, quota) {
+      const orderRef = orders.doc(code), notifyRef = mail.doc(notifyMailId(code));
+      const quotaRef = db.collection(LIMIT_COLLECTION).doc(quota.id);
+      return db.runTransaction(async transaction => {
+        const [orderSnapshot, notifySnapshot, quotaSnapshot] = await transaction.getAll(orderRef, notifyRef, quotaRef);
+        if (!orderSnapshot.exists) throw new ShopError(404, 'order-not-found');
+        if (notifySnapshot.exists) return { already: true };
+        const order = orderSnapshot.data();
+        if (order.status === 'cancelled') throw new ShopError(409, 'order-cancelled');
+        const count = quotaSnapshot.exists ? Number(quotaSnapshot.data().count) || 0 : 0;
+        if (count >= quota.maximum) throw new ShopError(429, 'too-many-notifications');
+        const notice = orderNotifyMail(Object.assign({ code }, order), { now });
+        if (!notice) throw new ShopError(409, 'order-not-ready');
+        transaction.set(quotaRef, { count: count + 1, expiresAt: timestamp(quota.expiresAt) });
+        transaction.create(notifyRef, notice);
+        transaction.update(orderRef, { notifiedAt: timestamp(now) });
+        return { already: false, to: notice.to };
       });
     },
 
