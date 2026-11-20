@@ -144,4 +144,117 @@ function receiptMail(order, { now = Date.now(), resend = false } = {}) {
   };
 }
 
-module.exports = { SENDER_EMAIL, SENDER_NAME, MAIL_COLLECTION, MAIL_PREFIX, UEN, validEmail, mailId, escapeHtml, receiptMail };
+// ─── The centre's own "new order" email ───────────────────────────────────────
+// Every order placed on /products tells the centre about itself, so a sale is never
+// only found by opening the admin page. It goes to these two inboxes and nobody
+// else; the browser never chooses a recipient.
+//   Card:    written by finalize() in the same transaction that records the paid
+//            order, so it goes out exactly once however often Stripe calls in.
+//   PayNow:  the page calls notifyShopOrder the moment the order is saved; the
+//            server reads the order back from shop_orders and composes this itself.
+// One email per order code: the id is fixed, and a second call finds it there.
+const NOTIFY_EMAILS = Object.freeze(['chungzhikai@gmail.com', 'admin@polymathlc.com.sg']);
+const NOTIFY_PREFIX = 'polymath-shop-order-';
+const ADMIN_URL = SHOP_URL + '#admin';
+const notifyMailId = code => NOTIFY_PREFIX + code + '-admin';
+
+// What the centre has to do next, which depends on how the order was paid.
+function notifyStatus(order) {
+  if (order.payment === 'card') return { tag: 'PAID by card', line: 'Paid by card through Stripe. Nothing to check; the stock has been taken out.' };
+  if (order.status === 'paid' || order.status === 'collected') return { tag: 'PAID by PayNow', line: 'Paid by PayNow and already marked paid.' };
+  return {
+    tag: 'PayNow: check payment',
+    line: 'The buyer says they have paid by PayNow. Check the bank for reference "' + String(order.reference || ('PLC ' + order.code))
+      + '", then press Mark paid on the orders page (that emails their receipt).'
+  };
+}
+
+function orderNotifyMail(order, { now = Date.now() } = {}) {
+  if (!order || !order.code) return null;
+  const customer = order.customer || {};
+  const name = String(customer.name || '').trim();
+  const phone = String(customer.phone || '').trim();
+  const email = String(customer.email || '').trim();
+  const lines = receiptLines(order);
+  const subtotal = order.subtotal !== undefined ? Number(order.subtotal) || 0 : lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const fee = Number(order.deliveryFee) || 0;
+  const total = Number(order.total) || subtotal + fee;
+  const reference = String(order.reference || ('PLC ' + order.code));
+  const status = notifyStatus(order);
+  const when = paidOn(toMillis(order.paidAt, toMillis(order.createdAt, now)));
+  const note = String(order.note || '').trim();
+  const address = String(order.address || '').trim();
+  const fulfilment = order.fulfilment === 'delivery' ? 'Delivery to: ' + (address || '(address not given)') : 'Collect at the centre';
+  const screenshot = typeof order.receiptUrl === 'string' && /^https:\/\//.test(order.receiptUrl) ? order.receiptUrl : '';
+  const warnings = [];
+  if (Array.isArray(order.stockShort) && order.stockShort.length) warnings.push('Stock ran short on ' + order.stockShort.length + ' line(s): this order oversold. Check the orders page.');
+  if (Array.isArray(order.paymentChecks) && order.paymentChecks.length) warnings.push('Payment check: ' + order.paymentChecks.join(', ') + '. Compare the amount in Stripe.');
+  const subject = 'New order ' + order.code + ': ' + money(total) + ' (' + status.tag + ')' + (name ? ' from ' + name.slice(0, 60) : '');
+
+  const text = [
+    'A new order was placed on polymathlc.com.sg/products.',
+    '',
+    status.line,
+    ...warnings.map(warning => 'WARNING: ' + warning),
+    '',
+    'Order code: ' + order.code,
+    'Reference: ' + reference,
+    'Placed: ' + when,
+    'Total: ' + money(total),
+    '',
+    ...lines.map(line => line.qty + ' x ' + line.name + (line.sku ? ' (' + line.sku + ')' : '') + '  ' + money(line.lineTotal)),
+    ...(fee > 0 ? ['Subtotal  ' + money(subtotal), 'Delivery fee  ' + money(fee)] : []),
+    '',
+    'Name: ' + (name || '(not given)'),
+    'WhatsApp: ' + (phone || '(not given)'),
+    'Email: ' + (email || '(not given)'),
+    fulfilment,
+    ...(note ? ['Note: ' + note] : []),
+    ...(screenshot ? ['Payment screenshot: ' + screenshot] : []),
+    '',
+    'Orders page: ' + ADMIN_URL
+  ].join('\n');
+
+  const cell = 'padding:10px 0;border-bottom:1px solid #F0E6D6;font-size:15px;line-height:1.5;vertical-align:top';
+  const rows = lines.map(line =>
+    '<tr><td style="' + cell + '">' + line.qty + ' &times; ' + escapeHtml(line.name)
+      + (line.sku ? '<br><span style="font-size:12px;color:#8A8A8A">' + escapeHtml(line.sku) + '</span>' : '') + '</td>'
+      + '<td style="' + cell + ';text-align:right;white-space:nowrap">' + money(line.lineTotal) + '</td></tr>').join('');
+  const fact = (label, value) => '<tr><td style="padding:3px 16px 3px 0;font-size:14px;color:#8A8A8A;white-space:nowrap;vertical-align:top">' + label
+    + '</td><td style="padding:3px 0;font-size:14px;color:#1A1A1A;font-weight:600">' + escapeHtml(value) + '</td></tr>';
+  const paid = order.payment === 'card' || order.status === 'paid' || order.status === 'collected';
+  const html =
+    '<div style="font-family:\'Century Gothic\',CenturyGothic,AppleGothic,Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#1A1A1A">'
+    + '<p style="font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#8A5A12;margin:0 0 8px">New order on /products</p>'
+    + '<p style="font-size:24px;font-weight:700;line-height:1.3;margin:0 0 16px">' + money(total) + ' &middot; ' + escapeHtml(order.code) + '</p>'
+    + '<div style="background:' + (paid ? '#EAF7EE;border:1px solid #BFE5C8' : '#FFF4E0;border:1px solid #FFD28A') + ';border-radius:14px;padding:14px 18px;margin:0 0 20px;font-size:15px;line-height:1.6">'
+    + '<b>' + escapeHtml(status.tag) + '</b><br>' + escapeHtml(status.line) + '</div>'
+    + warnings.map(warning => '<div style="background:#FDECEC;border:1px solid #F5B5B5;border-radius:14px;padding:12px 18px;margin:0 0 12px;font-size:14px;line-height:1.6">' + escapeHtml(warning) + '</div>').join('')
+    + '<div style="background:#FFF8EE;border:1px solid #FFE0B2;border-radius:14px;padding:16px 18px;margin:0 0 24px">'
+    + '<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse">'
+    + fact('Order code', order.code) + fact('Reference', reference) + fact('Placed', when)
+    + fact('Name', name || '(not given)') + fact('WhatsApp', phone || '(not given)') + fact('Email', email || '(not given)')
+    + fact(order.fulfilment === 'delivery' ? 'Deliver to' : 'Fulfilment', order.fulfilment === 'delivery' ? (address || '(address not given)') : 'Collect at the centre')
+    + (note ? fact('Note', note) : '')
+    + '</table></div>'
+    + '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin:0 0 8px">' + rows
+    + (fee > 0 ? '<tr><td style="padding:8px 0 0;font-size:14px;color:#5C5C5C">Delivery fee</td><td style="padding:8px 0 0;text-align:right;font-size:14px;color:#5C5C5C">' + money(fee) + '</td></tr>' : '')
+    + '<tr><td style="padding:8px 0 0;font-size:16px;font-weight:700">Total</td><td style="padding:8px 0 0;text-align:right;font-size:16px;font-weight:700">' + money(total) + '</td></tr>'
+    + '</table>'
+    + (screenshot ? '<p style="font-size:14px;line-height:1.6;margin:20px 0 0"><a href="' + escapeHtml(screenshot) + '" style="color:#8A5A12">View the payment screenshot</a></p>' : '')
+    + '<p style="margin:28px 0 0"><a href="' + ADMIN_URL + '" style="display:inline-block;background:#1A1A1A;color:#FFFFFF;text-decoration:none;font-size:15px;font-weight:700;padding:12px 22px;border-radius:12px">Open the orders page</a></p>'
+    + '<p style="font-size:12px;line-height:1.6;color:#8A8A8A;margin:28px 0 0">Sent automatically by polymathlc.com.sg/products to ' + NOTIFY_EMAILS.join(' and ') + '.</p>'
+    + '</div>';
+
+  return {
+    to: [...NOTIFY_EMAILS],
+    from: SENDER_NAME + ' <' + SENDER_EMAIL + '>',
+    // Replying goes straight to the buyer.
+    replyTo: validEmail(email) ? email : SENDER_EMAIL,
+    message: { subject, text, html },
+    polymathShop: { code: order.code, kind: 'order-notify' }
+  };
+}
+
+module.exports = { SENDER_EMAIL, SENDER_NAME, MAIL_COLLECTION, MAIL_PREFIX, UEN, NOTIFY_EMAILS, NOTIFY_PREFIX,
+  validEmail, mailId, notifyMailId, escapeHtml, receiptMail, orderNotifyMail };

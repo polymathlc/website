@@ -68,6 +68,8 @@ exports.createShopCheckout = onRequest(web, service.createCheckout);
 exports.shopCheckoutStatus = onRequest(web, service.checkoutStatus);
 exports.stripeShopWebhook = onRequest(web, service.webhook);
 exports.sendShopReceipt = onRequest(web, service.sendReceipt);
+// Emails the centre about an order the page has just saved (see receipt.js).
+exports.notifyShopOrder = onRequest(web, service.notifyOrder);
 exports.createScheduleCheckout = onRequest(web, bookings.createCheckout);
 exports.scheduleCheckoutStatus = onRequest(web, bookings.checkoutStatus);
 exports.bookDiagnostic = onRequest(web, diagnostics.bookDiagnostic);
